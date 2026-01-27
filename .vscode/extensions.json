@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "astral-sh.ty",
+        "charliermarsh.ruff",
+        "eamodio.gitlens",
+        "esbenp.prettier-vscode",
+        "ms-python.python",
+        "tamasfe.even-better-toml",
+        "yzhang.markdown-all-in-one"
+    ]
+}

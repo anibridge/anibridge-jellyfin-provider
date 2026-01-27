@@ -1,0 +1,25 @@
+{
+    "name": "anibridge-provider-template",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+    "features": {
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        "ghcr.io/devcontainers-extra/features/uv": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "astral-sh.ty",
+                "charliermarsh.ruff",
+                "eamodio.gitlens",
+                "esbenp.prettier-vscode",
+                "ms-python.python",
+                "tamasfe.even-better-toml",
+                "yzhang.markdown-all-in-one"
+            ]
+        }
+    },
+    "postCreateCommand": "uv sync --all-groups --all-packages",
+    "containerEnv": {
+        "UV_LINK_MODE": "copy"
+    }
+}
