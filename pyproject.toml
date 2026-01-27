@@ -1,7 +1,7 @@
 [project]
-name = "anibridge-example-provider"
+name = "anibridge-jellyfin-provider"
 version = "0.1.0"
-description = "Example provider for the AniBridge project."
+description = "Jellyfin provider for the AniBridge project."
 readme = "README.md"
 requires-python = ">=3.14"
 
@@ -21,7 +21,7 @@ classifiers = [
 
 dependencies = [
     "anibridge-library-base>=0.2.0b2",
-    "anibridge-list-base>=0.2.0b3",
+    "jellyfin-apiclient-python>=1.11.0",
 ]
 
 [tool.ruff]
@@ -54,6 +54,6 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
-    "ruff>=0.14.6",
-    "ty>=0.0.11",
+    "ruff>=0.14.14",
+    "ty>=0.0.14",
 ]
