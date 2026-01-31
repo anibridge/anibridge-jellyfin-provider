@@ -1,0 +1,381 @@
+"""Jellyfin client abstractions consumed by the library provider."""
+
+import asyncio
+import importlib.metadata
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from logging import getLogger
+from typing import TYPE_CHECKING, ClassVar
+from urllib.parse import urlencode
+from uuid import UUID
+
+# The jellyfin-sdk package uses dynamic that cannot be type-checked statically
+if TYPE_CHECKING:
+    from jellyfin.generated.api_10_11 import (
+        ApiClient,
+        BaseItemDto,
+        BaseItemKind,
+        Configuration,
+        ItemFields,
+        ItemsApi,
+        UserApi,
+        UserDto,
+        UserLibraryApi,
+        UserViewsApi,
+    )
+else:
+    from jellyfin.generated import (
+        ApiClient,
+        BaseItemDto,
+        BaseItemKind,
+        Configuration,
+        ItemFields,
+        ItemsApi,
+        UserApi,
+        UserDto,
+        UserLibraryApi,
+        UserViewsApi,
+    )
+
+
+__all__ = ["JellyfinClient"]
+
+_LOG = getLogger(__name__)
+
+
+class JellyfinClient:
+    """High-level Jellyfin client wrapper used by the library provider."""
+
+    ITEM_FIELDS: ClassVar[tuple[ItemFields, ...]] = (
+        ItemFields.PATH,
+        ItemFields.GENRES,
+        ItemFields.SORTNAME,
+        ItemFields.TAGLINES,
+        ItemFields.DATECREATED,
+        ItemFields.DATELASTSAVED,
+        ItemFields.OVERVIEW,
+        ItemFields.PROVIDERIDS,
+        ItemFields.PARENTID,
+    )
+
+    def __init__(
+        self,
+        *,
+        url: str,
+        token: str,
+        user: str,
+        section_filter: Sequence[str] | None = None,
+        genre_filter: Sequence[str] | None = None,
+    ) -> None:
+        """Initialize the session wrapper.
+
+        Args:
+            url (str): Base Jellyfin server URL.
+            token (str): Jellyfin API token.
+            user (str): Jellyfin user name or id.
+            section_filter (Sequence[str] | None): If provided, only sections whose
+                names are in this list (case-insensitive) are included.
+            genre_filter (Sequence[str] | None): If provided, only items matching one
+                of these genres are included.
+        """
+        self._url = url
+        self._token = token
+        self._user = user
+        self._section_filter = {value.lower() for value in section_filter or ()}
+        self._genre_filter = {value.lower() for value in genre_filter or ()}
+
+        self._api_client: ApiClient | None = None
+        self._items_api: ItemsApi | None = None
+        self._user_api: UserApi | None = None
+        self._user_library_api: UserLibraryApi | None = None
+        self._user_views_api: UserViewsApi | None = None
+        self._user_id: UUID | None = None
+        self._user_name: str | None = None
+        self._base_url = url.rstrip("/")
+        self._sections: list[BaseItemDto] = []
+
+    async def initialize(self) -> None:
+        """Authenticate and populate server metadata."""
+        await asyncio.to_thread(self._configure_client)
+        user = await asyncio.to_thread(self._resolve_user)
+
+        self._user_id = user.id
+        self._user_name = user.name or str(user.id)
+        self._sections = await asyncio.to_thread(self._load_sections)
+
+    async def close(self) -> None:
+        """Release any held resources."""
+        self._api_client = None
+        self._items_api = None
+        self._user_api = None
+        self._user_library_api = None
+        self._user_views_api = None
+        self._user_id = None
+        self._user_name = None
+        self._sections.clear()
+
+    def user_id(self) -> str:
+        """Return the Jellyfin user id for the session."""
+        if self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        return str(self._user_id)
+
+    def user_name(self) -> str:
+        """Return the Jellyfin user display name for the session."""
+        if self._user_id is None or self._user_name is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        return self._user_name
+
+    def auth_headers(self) -> dict[str, str]:
+        """Return request headers for authenticated Jellyfin calls."""
+        return {"X-Emby-Token": self._token}
+
+    def sections(self) -> Sequence[BaseItemDto]:
+        """Return the cached Jellyfin library sections."""
+        return tuple(self._sections)
+
+    async def list_section_items(
+        self,
+        section: BaseItemDto,
+        *,
+        min_last_modified: datetime | None = None,
+        require_watched: bool = False,
+        keys: Sequence[str] | None = None,
+    ) -> Sequence[BaseItemDto]:
+        """Return Jellyfin items for the provided section with filtering applied."""
+        items = await asyncio.to_thread(self._fetch_section_items, section)
+        filtered = list(items)
+
+        if min_last_modified is not None:
+            filtered = [
+                item
+                for item in filtered
+                if (
+                    last_modified := _parse_datetime(
+                        item.date_last_media_added or item.date_created
+                    )
+                )
+                is None
+                or last_modified >= min_last_modified
+            ]
+
+        if require_watched:
+            filtered = [
+                item
+                for item in filtered
+                if item.user_data
+                and (item.user_data.played or (item.user_data.play_count or 0) > 0)
+            ]
+
+        if keys is not None:
+            allowed = set(keys)
+            filtered = [item for item in filtered if item.id in allowed]
+
+        return tuple(filtered)
+
+    def list_show_seasons(self, show_id: UUID) -> Sequence[BaseItemDto]:
+        """Return the seasons for a Jellyfin show."""
+        if self._items_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        if self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        items_api = self._items_api
+        response = items_api.get_items(
+            user_id=self._user_id,
+            parent_id=show_id,
+            include_item_types=[BaseItemKind.SEASON],
+            recursive=True,
+            fields=list(self.ITEM_FIELDS),
+            enable_user_data=True,
+            enable_images=True,
+        )
+        return tuple(response.items or []) if response else ()
+
+    def list_show_episodes(
+        self, *, show_id: UUID, season_id: UUID | None = None
+    ) -> Sequence[BaseItemDto]:
+        """Return the episodes for a Jellyfin show."""
+        if self._items_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        if self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        items_api = self._items_api
+        response = items_api.get_items(
+            user_id=self._user_id,
+            parent_id=season_id or show_id,
+            include_item_types=[BaseItemKind.EPISODE],
+            recursive=True,
+            fields=list(self.ITEM_FIELDS),
+            enable_user_data=True,
+            enable_images=True,
+        )
+        return tuple(response.items or []) if response else ()
+
+    def get_item(self, item_id: UUID) -> BaseItemDto:
+        """Fetch metadata for a single Jellyfin item."""
+        if self._user_library_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        if self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        return self._user_library_api.get_item(item_id, user_id=self._user_id)
+
+    async def fetch_history(self, item: BaseItemDto) -> Sequence[tuple[str, datetime]]:
+        """Return play history tuples for an item (item id, played timestamp)."""
+        if item.id is None:
+            return ()
+
+        if item.type in {"Season", "Series"}:
+            episodes = self.list_show_episodes(
+                show_id=item.id,
+                season_id=item.id if item.type == "Season" else None,
+            )
+            history = []
+            for episode in episodes:
+                if not episode.id:
+                    continue
+                last_played = _parse_datetime(
+                    episode.user_data.last_played_date if episode.user_data else None
+                )
+                if last_played is None:
+                    continue
+                history.append((str(episode.id), last_played))
+        else:
+            last_played = _parse_datetime(
+                item.user_data.last_played_date if item.user_data else None
+            )
+            history = [(str(item.id), last_played)] if last_played is not None else []
+
+        return tuple(history)
+
+    def is_on_continue_watching(self, item: BaseItemDto) -> bool:
+        """Determine whether the item appears in Jellyfin's continue watching list."""
+        user_data = item.user_data
+        if user_data and user_data.played:
+            return False
+        try:
+            return int((user_data.playback_position_ticks if user_data else 0) or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def is_on_watchlist(self, item: BaseItemDto) -> bool:
+        """Determine whether the item is on the user's favorites list."""
+        user_data = item.user_data
+        return bool(user_data.is_favorite if user_data else False)
+
+    def build_image_url(
+        self, item_id: str, *, image_type: str = "Primary", tag: str | None = None
+    ) -> str:
+        """Construct an image URL."""
+        base_url = self._base_url
+        params = {
+            "maxHeight": 400,
+            "maxWidth": 300,
+            "quality": 90,
+            "api_key": self._token,
+        }
+        if tag:
+            params["tag"] = tag
+        return f"{base_url}/Items/{item_id}/Images/{image_type}?{urlencode(params)}"
+
+    def clear_cache(self) -> None:
+        """Clear cached metadata (no-op for Jellyfin)."""
+        return None
+
+    def _configure_client(self) -> None:
+        configuration = Configuration(host=self._base_url)
+        configuration.api_key["CustomAuthentication"] = f'Token="{self._token}"'
+        configuration.api_key_prefix["CustomAuthentication"] = "MediaBrowser"
+        configuration.user_agent = (
+            importlib.metadata.metadata("anibridge-jellyfin-provider").get(
+                "Name", "anibridge-jellyfin-provider"
+            )
+            + "/"
+            + importlib.metadata.version("anibridge-jellyfin-provider")
+        )
+        self._api_client = ApiClient(configuration)
+        self._items_api = ItemsApi(self._api_client)
+        self._user_api = UserApi(self._api_client)
+        self._user_library_api = UserLibraryApi(self._api_client)
+        self._user_views_api = UserViewsApi(self._api_client)
+
+    def _resolve_user(self) -> UserDto:
+        if self._user_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        users = self._user_api.get_users() or []
+        target = self._user.strip()
+        if not target:
+            raise ValueError("Jellyfin provider requires a non-empty user value")
+
+        for user in users:
+            if str(user.id or "").lower() == target.lower():
+                return user
+            if str(user.name or "").lower() == target.lower():
+                return user
+
+        raise ValueError(f"Unable to locate Jellyfin user: {self._user}")
+
+    def _load_sections(self) -> list[BaseItemDto]:
+        if self._user_views_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        if self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        response = self._user_views_api.get_user_views(user_id=self._user_id)
+        items = list(response.items or []) if response else []
+
+        sections: list[BaseItemDto] = []
+        for item in items:
+            collection = (item.collection_type or "").lower()
+            if collection not in {"movies", "tvshows"}:
+                continue
+            if (
+                self._section_filter
+                and (item.name or "").lower() not in self._section_filter
+            ):
+                continue
+            sections.append(item)
+        return sections
+
+    def _fetch_section_items(self, section: BaseItemDto) -> list[BaseItemDto]:
+        collection = (section.collection_type or "").lower()
+        include_types = (
+            [BaseItemKind.MOVIE] if collection == "movies" else [BaseItemKind.SERIES]
+        )
+        if self._items_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        if self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+        response = self._items_api.get_items(
+            user_id=self._user_id,
+            parent_id=section.id,
+            include_item_types=include_types,
+            recursive=True,
+            fields=list(self.ITEM_FIELDS),
+            enable_user_data=True,
+            enable_images=True,
+        )
+        items: list[BaseItemDto] = list(response.items or []) if response else []
+
+        if not self._genre_filter:
+            return items
+
+        return [
+            item
+            for item in items
+            if any(genre.lower() in self._genre_filter for genre in (item.genres or []))
+        ]
+
+
+def _parse_datetime(value: str | datetime | None) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    try:
+        value = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        _LOG.debug("Failed to parse datetime: %s", value)
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed

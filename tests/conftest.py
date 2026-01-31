@@ -5,20 +5,25 @@ from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
 
-from anibridge_example_provider.example_library import ExampleLibraryProvider
-from anibridge_example_provider.example_list import ExampleListProvider
+from anibridge_jellyfin_provider.library import JellyfinLibraryProvider
 
 
 @pytest.fixture()
-def library_provider() -> ExampleLibraryProvider:
+def library_provider() -> JellyfinLibraryProvider:
     """Return a fresh library provider instance."""
-    return ExampleLibraryProvider()
+    return JellyfinLibraryProvider(
+        config={
+            "url": "http://jellyfin.example",
+            "token": "token",
+            "user": "demo",
+        }
+    )
 
 
 @pytest_asyncio.fixture()
 async def initialized_library_provider(
-    library_provider: ExampleLibraryProvider,
-) -> AsyncGenerator[ExampleLibraryProvider]:
+    library_provider: JellyfinLibraryProvider,
+) -> AsyncGenerator[JellyfinLibraryProvider]:
     """Return a provider that has run its async initialize hook."""
     await library_provider.initialize()
     yield library_provider
@@ -26,24 +31,8 @@ async def initialized_library_provider(
 
 
 @pytest_asyncio.fixture()
-async def library_section(initialized_library_provider: ExampleLibraryProvider):
-    """Return the single demo section exposed by the library provider."""
+async def library_section(initialized_library_provider: JellyfinLibraryProvider):
+    """Return the first available section exposed by the provider."""
     sections = await initialized_library_provider.get_sections()
     assert len(sections)
     return sections[0]
-
-
-@pytest.fixture()
-def list_provider() -> ExampleListProvider:
-    """Return a fresh list provider instance."""
-    return ExampleListProvider()
-
-
-@pytest_asyncio.fixture()
-async def initialized_list_provider(
-    list_provider: ExampleListProvider,
-) -> AsyncGenerator[ExampleListProvider]:
-    """Return a list provider after initialization and ensure cleanup."""
-    await list_provider.initialize()
-    yield list_provider
-    await list_provider.close()

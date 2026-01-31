@@ -1,40 +1,37 @@
-# anibridge-provider-template
+# anibridge-jellyfin-provider
 
-Two short provider implementations demonstrate how to implement the
-[`anibridge_providers`](https://github.com/anibridge/anibridge-providers) SDK:
+Jellyfin library provider implementation for the AniBridge project.
 
--   `ExampleLibraryProvider` in [`example_library.py`](./src/anibridge_example_provider/example_library.py)
--   `ExampleListProvider` in [`example_list.py`](./src/anibridge_example_provider/example_list.py)
+## Configuration
 
-```python
-async def main() -> None:
-    from anibridge_example_provider import ExampleLibraryProvider, ExampleListProvider
+### `url` (`str`)
 
-    library = ExampleLibraryProvider()
-    list_provider = ExampleListProvider()
+The base URL of the Jellyfin server (e.g., http://localhost:8096).
 
-    await library.initialize()
-    await list_provider.initialize()
+### `token` (`str`)
 
-    print("Library Sections:")
-    sections = await library.get_sections()
-    for section in sections:
-        print(f"- {section.title} (key: {section.key})")
+The Jellyfin API token. You can generate this under the user settings in Jellyfin.
 
-    print("\nLibrary Items:")
-    for section in sections:
-        items = await library.list_items(section)
-        for item in items:
-            print(f"- {item.title} (key: {item.key})")
+### `user` (`str`)
 
-"""
-Library Sections:
-- Demo Movies (key: movies)
+The Jellyfin user to synchronize. This can be a user id, username, or display name.
 
-Library Items:
-- Castle in the Sky (key: castle-in-the-sky)
-- Nausicaä of the Valley of the Wind (key: nausicaa)
-"""
+### `sections` (`list[str]`, optional)
+
+A list of Jellyfin library section names to constrain synchronization to. Leave
+empty/unset to include all sections.
+
+### `genres` (`list[str]`, optional)
+
+A list of genres to constrain synchronization to. Leave empty/unset to include all
+genres.
+
+```yaml
+library_provider_config:
+  jellyfin:
+    url: ...
+    token: ...
+    user: ...
+    # sections: []
+    # genres: []
 ```
-
-Use these classes as a starting point for your own provider implementations.
