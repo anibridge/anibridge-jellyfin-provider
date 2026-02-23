@@ -57,6 +57,15 @@ _PROVIDER_ID_MAP = {
     },
 }
 
+_STRICT_FETCHER_TO_PROVIDER = {
+    "AniDb": "anidb",
+    "AniList": "anilist",
+    "Tvdb": "tvdb_show",
+    "TheTVDB": "tvdb_show",
+    "TheMovieDb": "tmdb_show",
+    "IMDb": "imdb_show",
+}
+
 
 class JellyfinLibrarySection(LibrarySection["JellyfinLibraryProvider"]):
     """Concrete `LibrarySection` backed by a Jellyfin view."""
@@ -178,6 +187,18 @@ class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
             if not mapped:
                 continue
             descriptors.append((mapped, str(value), None))
+
+        if self._media_kind == MediaKind.SHOW and self._provider._strict:
+            required_provider = self._provider._strict_show_provider_by_section.get(
+                self._section.key
+            )
+            if not required_provider:
+                return ()
+            descriptors = [
+                descriptor
+                for descriptor in descriptors
+                if descriptor[0] == required_provider
+            ]
 
         return tuple(descriptors)
 
@@ -430,12 +451,13 @@ class JellyfinLibraryProvider(LibraryProvider):
         self._client_user = str(user)
         self._section_filter = list(self.config.get("sections") or [])
         self._genre_filter = list(self.config.get("genres") or [])
-
+        self._strict = bool(self.config.get("strict") or False)
         self._client = self._create_client()
         self._user: LibraryUser | None = None
 
         self._sections: list[JellyfinLibrarySection] = []
         self._section_map: dict[str, JellyfinLibrarySection] = {}
+        self._strict_show_provider_by_section: dict[str, str] = {}
 
     async def initialize(self) -> None:
         """Connect to Jellyfin and prepare provider state."""
@@ -444,6 +466,18 @@ class JellyfinLibraryProvider(LibraryProvider):
             key=self._client.user_id(), title=self._client.user_name()
         )
         self._sections = self._build_sections()
+        self._strict_show_provider_by_section.clear()
+        if self._strict:
+            for section in self._sections:
+                if section.media_kind != MediaKind.SHOW:
+                    continue
+                metadata_fetcher = self._client.show_metadata_fetcher_for_section(
+                    section.key
+                )
+                if not metadata_fetcher:
+                    continue
+                if provider := _STRICT_FETCHER_TO_PROVIDER.get(metadata_fetcher):
+                    self._strict_show_provider_by_section[section.key] = provider
         await self.clear_cache()
 
     async def close(self) -> None:
@@ -451,6 +485,7 @@ class JellyfinLibraryProvider(LibraryProvider):
         await self._client.close()
         self._sections.clear()
         self._section_map.clear()
+        self._strict_show_provider_by_section.clear()
 
     def user(self) -> LibraryUser | None:
         """Return the Jellyfin user represented by this provider."""

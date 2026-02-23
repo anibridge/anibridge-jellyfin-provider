@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
+from anibridge.library import LibraryShow
 
 import anibridge_jellyfin_provider.library as library_module
 
@@ -11,9 +13,18 @@ import anibridge_jellyfin_provider.library as library_module
 class FakeJellyfinClient:
     """Stub for a Jellyfin client session."""
 
-    def __init__(self, *, sections: list[FakeItem], items: dict[str, list[FakeItem]]):
+    def __init__(
+        self,
+        *,
+        sections: list[FakeItem],
+        items: dict[str, list[FakeItem]],
+        show_metadata_fetchers_by_section: dict[str, str] | None = None,
+    ):
         self._sections = sections
         self._items = items
+        self._show_metadata_fetchers_by_section = (
+            show_metadata_fetchers_by_section or {}
+        )
         self._user_id = "user-1"
         self._user_name = "Demo User"
         self.closed = False
@@ -101,6 +112,9 @@ class FakeJellyfinClient:
 
     def clear_cache(self) -> None:
         return None
+
+    def show_metadata_fetcher_for_section(self, section_id: str) -> str | None:
+        return self._show_metadata_fetchers_by_section.get(section_id)
 
 
 class FakeRequest:
@@ -341,6 +355,85 @@ async def test_season_and_episode_mapping_scopes(library_setup):
     assert len(episodes) == 1
     episode = episodes[0]
     assert episode.mapping_descriptors() == descriptors
+
+
+@pytest.mark.asyncio
+async def test_strict_mode_filters_show_mappings_to_top_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Strict mode keeps only descriptors for the top TV metadata downloader."""
+    show = FakeItem(
+        id="show-1",
+        name="Show One",
+        type="Series",
+        provider_ids={"AniDb": "3333", "AniList": "4444", "Tvdb": "55"},
+        user_data=FakeUserData(
+            played=False,
+            play_count=0,
+            is_favorite=False,
+            playback_position_ticks=123,
+        ),
+        date_last_saved="2025-01-10T12:00:00Z",
+    )
+    season = FakeItem(
+        id="season-1",
+        name="Season 1",
+        type="Season",
+        series_id="show-1",
+        index_number=1,
+    )
+    episode = FakeItem(
+        id="episode-1",
+        name="Episode 1",
+        type="Episode",
+        series_id="show-1",
+        season_id="season-1",
+        index_number=1,
+        parent_index_number=1,
+    )
+    sections = [
+        FakeItem(
+            id="sec-shows",
+            name="Shows",
+            type="CollectionFolder",
+            collection_type="tvshows",
+        )
+    ]
+    items = {
+        "sec-shows": [show],
+        "seasons:show-1": [season],
+        "episodes:season-1": [episode],
+    }
+    fake_client = FakeJellyfinClient(
+        sections=sections,
+        items=items,
+        show_metadata_fetchers_by_section={"sec-shows": "AniDb"},
+    )
+
+    monkeypatch.setattr(
+        library_module.JellyfinLibraryProvider,
+        "_create_client",
+        lambda self: fake_client,
+    )
+    provider = library_module.JellyfinLibraryProvider(
+        config={
+            "url": "http://jellyfin",
+            "token": "token",
+            "user": "demo",
+            "strict": True,
+        }
+    )
+    await provider.initialize()
+
+    show_section = (await provider.get_sections())[0]
+    show_item = cast(LibraryShow, (await provider.list_items(show_section))[0])
+    assert show_item.mapping_descriptors() == (("anidb", "3333", None),)
+
+    season_item = show_item.seasons()[0]
+    assert season_item.mapping_descriptors() == (("anidb", "3333", "R"),)
+
+    episode_item = season_item.episodes()[0]
+    assert episode_item.mapping_descriptors() == (("anidb", "3333", "R"),)
 
 
 @pytest.mark.asyncio

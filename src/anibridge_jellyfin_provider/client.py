@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         Configuration,
         ItemFields,
         ItemsApi,
+        LibraryStructureApi,
         UserApi,
         UserDto,
         UserLibraryApi,
@@ -31,6 +32,7 @@ else:
         Configuration,
         ItemFields,
         ItemsApi,
+        LibraryStructureApi,
         UserApi,
         UserDto,
         UserLibraryApi,
@@ -89,10 +91,12 @@ class JellyfinClient:
         self._user_api: UserApi | None = None
         self._user_library_api: UserLibraryApi | None = None
         self._user_views_api: UserViewsApi | None = None
+        self._library_structure_api: LibraryStructureApi | None = None
         self._user_id: UUID | None = None
         self._user_name: str | None = None
         self._base_url = url.rstrip("/")
         self._sections: list[BaseItemDto] = []
+        self._show_metadata_fetcher_by_section_id: dict[str, str] = {}
 
     async def initialize(self) -> None:
         """Authenticate and populate server metadata."""
@@ -102,6 +106,9 @@ class JellyfinClient:
         self._user_id = user.id
         self._user_name = user.name or str(user.id)
         self._sections = await asyncio.to_thread(self._load_sections)
+        self._show_metadata_fetcher_by_section_id = await asyncio.to_thread(
+            self._load_show_metadata_fetchers
+        )
 
     async def close(self) -> None:
         """Release any held resources."""
@@ -110,9 +117,11 @@ class JellyfinClient:
         self._user_api = None
         self._user_library_api = None
         self._user_views_api = None
+        self._library_structure_api = None
         self._user_id = None
         self._user_name = None
         self._sections.clear()
+        self._show_metadata_fetcher_by_section_id.clear()
 
     def user_id(self) -> str:
         """Return the Jellyfin user id for the session."""
@@ -133,6 +142,10 @@ class JellyfinClient:
     def sections(self) -> Sequence[BaseItemDto]:
         """Return the cached Jellyfin library sections."""
         return tuple(self._sections)
+
+    def show_metadata_fetcher_for_section(self, section_id: str) -> str | None:
+        """Return the top-priority TV metadata fetcher for a section if known."""
+        return self._show_metadata_fetcher_by_section_id.get(section_id)
 
     async def list_section_items(
         self,
@@ -302,6 +315,7 @@ class JellyfinClient:
         self._user_api = UserApi(self._api_client)
         self._user_library_api = UserLibraryApi(self._api_client)
         self._user_views_api = UserViewsApi(self._api_client)
+        self._library_structure_api = LibraryStructureApi(self._api_client)
 
     def _resolve_user(self) -> UserDto:
         if self._user_api is None:
@@ -368,6 +382,50 @@ class JellyfinClient:
             for item in items
             if any(genre.lower() in self._genre_filter for genre in (item.genres or []))
         ]
+
+    def _load_show_metadata_fetchers(self) -> dict[str, str]:
+        """Get the top-priority TV metadata fetcher for each section if known."""
+        if self._library_structure_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+
+        section_metadata_fetchers: dict[str, str] = {}
+        virtual_folders = self._library_structure_api.get_virtual_folders() or []
+        for folder in virtual_folders:
+            section_id = str(folder.item_id or "")
+            if not section_id:
+                continue
+
+            collection_type = str(folder.collection_type or "")
+            if collection_type != "tvshows":
+                continue
+
+            library_options = folder.library_options
+            type_options = library_options.type_options if library_options else None
+            if not type_options:
+                continue
+
+            metadata_fetcher: str | None = None
+            for option in type_options:
+                media_type = str(option.type or "")
+                if media_type != "Series":
+                    continue
+
+                fetchers = option.metadata_fetcher_order or option.metadata_fetchers
+                if not fetchers:
+                    continue
+
+                for fetcher in fetchers:
+                    candidate = str(fetcher)
+                    if candidate:
+                        metadata_fetcher = candidate
+                        break
+                if metadata_fetcher:
+                    break
+
+            if metadata_fetcher:
+                section_metadata_fetchers[section_id] = metadata_fetcher
+
+        return section_metadata_fetchers
 
     @staticmethod
     def _normalize_local_datetime(value: datetime | None) -> datetime | None:

@@ -26,6 +26,10 @@ empty/unset to include all sections.
 A list of genres to constrain synchronization to. Leave empty/unset to include all
 genres.
 
+### `strict` (`bool`, optional)
+
+When enabled, show/season/episode mappings are restricted to the section's highest-priority TV show metadata downloader from Jellyfin library options. For example, if the top TV metadata downloader is AniDB, only AniDB mapping descriptors will be considered for matching. When disabled, all metadata downloaders will be considered for matching. This option is enabled by default.
+
 ```yaml
 library_provider_config:
   jellyfin:
@@ -34,4 +38,5 @@ library_provider_config:
     user: ...
     # sections: []
     # genres: []
+    # strict: true
 ```
