@@ -96,6 +96,9 @@ class FakeJellyfinClient:
     ) -> str:
         return f"http://example.invalid/{item_id}/{image_type}?tag={tag or ''}"
 
+    def build_item_url(self, item_id: str) -> str:
+        return f"http://jellyfin/web/#/details?id={item_id}"
+
     def clear_cache(self) -> None:
         return None
 
@@ -315,3 +318,17 @@ async def test_history_uses_last_played_timestamp(library_setup):
     history = await movie_item.history()
     assert len(history) == 1
     assert history[0].library_key == movie.id
+
+
+@pytest.mark.asyncio
+async def test_media_external_url_points_to_jellyfin_details_page(library_setup):
+    """Media external_url should resolve to the Jellyfin item details page."""
+    provider, _client, movie, _show = library_setup
+    await provider.initialize()
+    movie_section = (await provider.get_sections())[0]
+    movie_item = (await provider.list_items(movie_section))[0]
+
+    assert (
+        movie_item.media().external_url
+        == f"http://jellyfin/web/#/details?id={movie.id}"
+    )

@@ -120,6 +120,14 @@ class JellyfinLibraryMedia(LibraryMedia["JellyfinLibraryProvider"]):
             _LOG.debug("Failed to fetch Jellyfin poster", exc_info=True)
             return None
 
+    @property
+    def external_url(self) -> str | None:
+        """URL to the Jellyfin page, if available."""
+        item_id = self._item.id
+        if item_id is None:
+            return None
+        return self._provider._client.build_item_url(str(item_id))
+
 
 class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
     """Common behaviour for Jellyfin-backed library objects."""
@@ -205,6 +213,7 @@ class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
         """Return the media metadata for this item."""
         return self._media
 
+    @property
     async def review(self) -> str | None:
         """Return the user's review text for this item, if any."""
         return None

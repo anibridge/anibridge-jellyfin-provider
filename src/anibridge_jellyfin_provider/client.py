@@ -277,6 +277,11 @@ class JellyfinClient:
             params["tag"] = tag
         return f"{base_url}/Items/{item_id}/Images/{image_type}?{urlencode(params)}"
 
+    def build_item_url(self, item_id: str) -> str:
+        """Construct a Jellyfin web URL for an item details page."""
+        params = urlencode({"id": item_id})
+        return f"{self._base_url}/web/#/details?{params}"
+
     def clear_cache(self) -> None:
         """Clear cached metadata (no-op for Jellyfin)."""
         return None
