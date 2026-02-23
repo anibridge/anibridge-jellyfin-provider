@@ -103,6 +103,27 @@ class FakeJellyfinClient:
         return None
 
 
+class FakeRequest:
+    """Lightweight request stub for webhook parsing tests."""
+
+    def __init__(
+        self,
+        *,
+        payload: dict[str, object] | str,
+        content_type: str = "application/json",
+    ) -> None:
+        self.headers = {"content-type": content_type}
+        self._payload = payload
+
+    async def json(self):
+        """Return JSON payload for request body parsing."""
+        return self._payload
+
+    async def form(self):
+        """Return form payload for multipart/form parsing."""
+        return {"payload": self._payload}
+
+
 def _parse_date(value: str | None) -> datetime:
     if not value:
         return datetime.min.replace(tzinfo=UTC)
@@ -332,3 +353,104 @@ async def test_media_external_url_points_to_jellyfin_details_page(library_setup)
         movie_item.media().external_url
         == f"http://jellyfin/web/#/details?id={movie.id}"
     )
+
+
+@pytest.mark.asyncio
+async def test_parse_webhook_matches_item_added_event(library_setup):
+    """ItemAdded webhooks should trigger sync for the added item id."""
+    provider, _client, movie, _show = library_setup
+    await provider.initialize()
+
+    request = FakeRequest(
+        payload={
+            "NotificationType": "ItemAdded",
+            "ItemType": "Movie",
+            "ItemId": movie.id,
+        }
+    )
+
+    should_sync, keys = await provider.parse_webhook(request)
+
+    assert should_sync is True
+    assert keys == (movie.id,)
+
+
+@pytest.mark.asyncio
+async def test_parse_webhook_uses_series_id_for_episode_events(library_setup):
+    """Episode webhooks should resolve to the parent series id for top-level sync."""
+    provider, _client, _movie, show = library_setup
+    await provider.initialize()
+
+    request = FakeRequest(
+        payload={
+            "NotificationType": "PlaybackStop",
+            "ItemType": "Episode",
+            "ItemId": "episode-1",
+            "SeriesId": show.id,
+            "UserId": "user-1",
+        }
+    )
+
+    should_sync, keys = await provider.parse_webhook(request)
+
+    assert should_sync is True
+    assert keys == (show.id,)
+
+
+@pytest.mark.asyncio
+async def test_parse_webhook_ignores_other_users(library_setup):
+    """User-scoped events from other users should be ignored."""
+    provider, _client, movie, _show = library_setup
+    await provider.initialize()
+
+    request = FakeRequest(
+        payload={
+            "NotificationType": "UserDataSaved",
+            "ItemType": "Movie",
+            "ItemId": movie.id,
+            "UserId": "another-user",
+        }
+    )
+
+    should_sync, keys = await provider.parse_webhook(request)
+
+    assert should_sync is False
+    assert keys == ()
+
+
+@pytest.mark.asyncio
+async def test_parse_webhook_ignores_unsupported_notification_types(library_setup):
+    """Unsupported webhook notification types should be ignored."""
+    provider, _client, movie, _show = library_setup
+    await provider.initialize()
+
+    request = FakeRequest(
+        payload={
+            "NotificationType": "SessionStart",
+            "ItemType": "Movie",
+            "ItemId": movie.id,
+            "UserId": "user-1",
+        }
+    )
+
+    should_sync, keys = await provider.parse_webhook(request)
+
+    assert should_sync is False
+    assert keys == ()
+
+
+@pytest.mark.asyncio
+async def test_parse_webhook_requires_item_id(library_setup):
+    """Webhook payloads without an item id should raise a ValueError."""
+    provider, _client, _movie, _show = library_setup
+    await provider.initialize()
+
+    request = FakeRequest(
+        payload={
+            "NotificationType": "ItemAdded",
+            "ItemType": "Movie",
+        }
+    )
+
+    with pytest.raises(ValueError, match="No item ID found"):
+        await provider.parse_webhook(request)

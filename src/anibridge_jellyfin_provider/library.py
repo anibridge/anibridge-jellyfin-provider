@@ -24,6 +24,10 @@ from anibridge.library import (
 from anibridge.library.base import MappingDescriptor
 
 from anibridge_jellyfin_provider.client import JellyfinClient
+from anibridge_jellyfin_provider.webhook import (
+    JellyfinWebhook,
+    JellyfinWebhookNotificationType,
+)
 
 # The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
 if TYPE_CHECKING:
@@ -458,7 +462,64 @@ class JellyfinLibraryProvider(LibraryProvider):
 
     async def parse_webhook(self, request: Request) -> tuple[bool, Sequence[str]]:
         """Parse a Jellyfin webhook request and determine affected media items."""
-        raise NotImplementedError("Jellyfin webhooks are not supported yet.")
+        payload = await JellyfinWebhook.from_request(request)
+
+        if not payload.notification_type:
+            _LOG.debug("Webhook: No notification type found in payload")
+            raise ValueError("No notification type found in webhook payload")
+
+        if not payload.top_level_item_id:
+            _LOG.debug("Webhook: No item ID found in payload")
+            raise ValueError("No item ID found in webhook payload")
+
+        sync_events = {
+            JellyfinWebhookNotificationType.ITEM_ADDED,
+            JellyfinWebhookNotificationType.PLAYBACK_STOP,
+            JellyfinWebhookNotificationType.USER_DATA_SAVED,
+        }
+
+        try:
+            notification_type = JellyfinWebhookNotificationType(
+                payload.notification_type
+            )
+        except ValueError:
+            _LOG.debug(
+                "Webhook: Ignoring unsupported event type %s",
+                payload.notification_type,
+            )
+            return (False, tuple())
+
+        if notification_type not in sync_events:
+            _LOG.debug("Webhook: Ignoring event type %s", notification_type)
+            return (False, tuple())
+
+        if notification_type != JellyfinWebhookNotificationType.ITEM_ADDED:
+            if not self._user:
+                _LOG.debug("Webhook: Provider user has not been initialized")
+                return (False, tuple())
+
+            user_id_match = (
+                payload.user_id and payload.user_id.lower() == self._user.key.lower()
+            )
+            user_name_match = (
+                payload.username
+                and self._user.title
+                and payload.username.lower() == self._user.title.lower()
+            )
+            if not (user_id_match or user_name_match):
+                _LOG.debug(
+                    "Webhook: Ignoring event %s for user ID %s",
+                    notification_type,
+                    payload.user_id,
+                )
+                return (False, tuple())
+
+        _LOG.info(
+            "Webhook: Matched webhook event %s for sync key %s",
+            notification_type,
+            payload.top_level_item_id,
+        )
+        return (True, (payload.top_level_item_id,))
 
     async def clear_cache(self) -> None:
         """Reset any cached Jellyfin responses maintained by the provider."""
