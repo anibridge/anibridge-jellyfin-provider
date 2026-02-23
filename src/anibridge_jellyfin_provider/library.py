@@ -3,7 +3,6 @@
 import base64
 from collections.abc import Sequence
 from datetime import datetime
-from logging import getLogger
 from typing import TYPE_CHECKING, cast
 
 import requests
@@ -19,6 +18,7 @@ from anibridge.library import (
     LibraryShow,
     LibraryUser,
     MediaKind,
+    ProviderLogger,
     library_provider,
 )
 from anibridge.library.base import MappingDescriptor
@@ -37,8 +37,6 @@ else:
 
 if TYPE_CHECKING:
     from starlette.requests import Request
-
-_LOG = getLogger(__name__)
 
 _PROVIDER_ID_MAP = {
     "movie": {
@@ -133,7 +131,7 @@ class JellyfinLibraryMedia(LibraryMedia["JellyfinLibraryProvider"]):
             encoded = base64.b64encode(response.content).decode("utf-8")
             return f"data:{content_type};base64,{encoded}"
         except Exception:
-            _LOG.debug("Failed to fetch Jellyfin poster", exc_info=True)
+            self._provider.log.exception("Failed to fetch Jellyfin poster")
             return None
 
     @property
@@ -432,14 +430,17 @@ class JellyfinLibraryProvider(LibraryProvider):
 
     NAMESPACE = "jellyfin"
 
-    def __init__(self, *, config: dict | None = None) -> None:
+    def __init__(self, *, logger: ProviderLogger, config: dict | None = None) -> None:
         """Parse configuration and prepare provider defaults."""
-        self.config = config or {}
+        super().__init__(logger=logger, config=config)
 
         url = self.config.get("url") or ""
         token = self.config.get("token") or ""
         user = self.config.get("user") or ""
         if not url or not token or not user:
+            self.log.warning(
+                "Jellyfin provider is missing one or more required credentials"
+            )
             raise ValueError(
                 "The Jellyfin provider requires 'url', 'token', and 'user' "
                 "configuration values"
@@ -460,6 +461,7 @@ class JellyfinLibraryProvider(LibraryProvider):
 
     async def initialize(self) -> None:
         """Connect to Jellyfin and prepare provider state."""
+        self.log.debug("Initializing Jellyfin provider client")
         await self._client.initialize()
         self._user = LibraryUser(
             key=self._client.user_id(), title=self._client.user_name()
@@ -478,13 +480,20 @@ class JellyfinLibraryProvider(LibraryProvider):
                 if provider := _STRICT_FETCHER_TO_PROVIDER.get(metadata_fetcher):
                     self._strict_show_provider_by_section[section.key] = provider
         await self.clear_cache()
+        self.log.debug(
+            "Jellyfin provider initialized for user id=%s with %s sections",
+            self._user.key,
+            len(self._sections),
+        )
 
     async def close(self) -> None:
         """Release any resources held by the provider."""
+        self.log.debug("Closing Jellyfin provider")
         await self._client.close()
         self._sections.clear()
         self._section_map.clear()
         self._strict_show_provider_by_section.clear()
+        self.log.debug("Closed Jellyfin provider")
 
     def user(self) -> LibraryUser | None:
         """Return the Jellyfin user represented by this provider."""
@@ -504,6 +513,9 @@ class JellyfinLibraryProvider(LibraryProvider):
     ) -> Sequence[LibraryEntry]:
         """List items in a Jellyfin library section matching the provided criteria."""
         if not isinstance(section, JellyfinLibrarySection):
+            self.log.warning(
+                "Jellyfin list_items received an incompatible section instance"
+            )
             raise TypeError(
                 "Jellyfin providers expect section objects created by the provider"
             )
@@ -521,11 +533,11 @@ class JellyfinLibraryProvider(LibraryProvider):
         payload = await JellyfinWebhook.from_request(request)
 
         if not payload.notification_type:
-            _LOG.debug("Webhook: No notification type found in payload")
+            self.log.warning("Webhook: No notification type found in payload")
             raise ValueError("No notification type found in webhook payload")
 
         if not payload.top_level_item_id:
-            _LOG.debug("Webhook: No item ID found in payload")
+            self.log.warning("Webhook: No item ID found in payload")
             raise ValueError("No item ID found in webhook payload")
 
         sync_events = {
@@ -539,19 +551,19 @@ class JellyfinLibraryProvider(LibraryProvider):
                 payload.notification_type
             )
         except ValueError:
-            _LOG.debug(
+            self.log.debug(
                 "Webhook: Ignoring unsupported event type %s",
                 payload.notification_type,
             )
             return (False, tuple())
 
         if notification_type not in sync_events:
-            _LOG.debug("Webhook: Ignoring event type %s", notification_type)
+            self.log.debug("Webhook: Ignoring event type %s", notification_type)
             return (False, tuple())
 
         if notification_type != JellyfinWebhookNotificationType.ITEM_ADDED:
             if not self._user:
-                _LOG.debug("Webhook: Provider user has not been initialized")
+                self.log.warning("Webhook: Provider user has not been initialized")
                 return (False, tuple())
 
             user_id_match = (
@@ -563,14 +575,14 @@ class JellyfinLibraryProvider(LibraryProvider):
                 and payload.username.lower() == self._user.title.lower()
             )
             if not (user_id_match or user_name_match):
-                _LOG.debug(
+                self.log.debug(
                     "Webhook: Ignoring event %s for user ID %s",
                     notification_type,
                     payload.user_id,
                 )
                 return (False, tuple())
 
-        _LOG.info(
+        self.log.debug(
             "Webhook: Matched webhook event %s for sync key %s",
             notification_type,
             payload.top_level_item_id,
@@ -626,6 +638,7 @@ class JellyfinLibraryProvider(LibraryProvider):
     def _create_client(self) -> JellyfinClient:
         """Construct and return a Jellyfin client for this provider."""
         return JellyfinClient(
+            logger=self.log,
             url=self._client_url,
             token=self._client_token,
             user=self._client_user,

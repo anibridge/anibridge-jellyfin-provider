@@ -4,10 +4,11 @@ import asyncio
 import importlib.metadata
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from logging import getLogger
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
+
+from anibridge.library import ProviderLogger
 
 # The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
 if TYPE_CHECKING:
@@ -44,8 +45,6 @@ else:
 
 __all__ = ["JellyfinClient"]
 
-_LOG = getLogger(__name__)
-
 
 class JellyfinClient:
     """High-level Jellyfin client wrapper used by the library provider."""
@@ -65,6 +64,7 @@ class JellyfinClient:
     def __init__(
         self,
         *,
+        logger: ProviderLogger,
         url: str,
         token: str,
         user: str,
@@ -74,6 +74,7 @@ class JellyfinClient:
         """Initialize the session wrapper.
 
         Args:
+            logger (ProviderLogger): Injected provider logger.
             url (str): Base Jellyfin server URL.
             token (str): Jellyfin API token.
             user (str): Jellyfin user name or id.
@@ -82,6 +83,7 @@ class JellyfinClient:
             genre_filter (Sequence[str] | None): If provided, only items matching one
                 of these genres are included.
         """
+        self.log = logger
         self._url = url
         self._token = token
         self._user = user

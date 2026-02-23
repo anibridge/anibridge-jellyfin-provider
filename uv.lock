@@ -106,7 +106,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anibridge-library-base", specifier = ">=0.2.0b2" },
+    { name = "anibridge-library-base", specifier = ">=0.2.0b3" },
     { name = "jellyfin-sdk", specifier = ">=0.3.0" },
 ]
 
@@ -121,14 +121,14 @@ dev = [
 
 [[package]]
 name = "anibridge-library-base"
-version = "0.2.0b2"
+version = "0.2.0b3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "starlette" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/17/c7/f9ef1375d6bfd591a9a0294d776be60532005bfcb662c69e602bd5b1e4cd/anibridge_library_base-0.2.0b2.tar.gz", hash = "sha256:fc8ec282b0562c51a99bdf6c7ad5c43a95205c28c3a7f6077d2043a0b53ece35", size = 6495, upload-time = "2026-01-26T20:24:18.966Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/cc/5ce442cdf52cb455987629aea3e2f15c017458a369b82cdf6eb9997d2a64/anibridge_library_base-0.2.0b3.tar.gz", hash = "sha256:0d62a0e0b37b416fe858999f2f2713ea60b8c78469598a64adf0269f881ca777", size = 6640, upload-time = "2026-02-23T14:57:41.233Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/93/2a/2a16379cd1805f418f15769f97e237b3bdfc5c3a68fa6ce333ec25cbe8d7/anibridge_library_base-0.2.0b2-py3-none-any.whl", hash = "sha256:1ffb586236ffa99e1d4edf8194415f6db87d63ad98f2b121fb82ec9f0bf10f63", size = 8276, upload-time = "2026-01-26T20:24:17.986Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/fb/a59c711a08afaa9e82ad811879787164f02bf967d20723a2b4dbc416f7f8/anibridge_library_base-0.2.0b3-py3-none-any.whl", hash = "sha256:18838ad7c8e75498f0ac789d7aa52840ef07fed7668b57eacad62794dd5a8bbd", size = 8445, upload-time = "2026-02-23T14:57:40.488Z" },
 ]
 
 [[package]]
