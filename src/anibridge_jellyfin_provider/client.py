@@ -15,6 +15,7 @@ if TYPE_CHECKING:
         ApiClient,
         BaseItemDto,
         BaseItemKind,
+        CollectionTypeOptions,
         Configuration,
         ItemFields,
         ItemsApi,
@@ -29,6 +30,7 @@ else:
         ApiClient,
         BaseItemDto,
         BaseItemKind,
+        CollectionTypeOptions,
         Configuration,
         ItemFields,
         ItemsApi,
@@ -267,7 +269,7 @@ class JellyfinClient:
             return False
         try:
             return int((user_data.playback_position_ticks if user_data else 0) or 0) > 0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
     def is_on_watchlist(self, item: BaseItemDto) -> bool:
@@ -391,12 +393,10 @@ class JellyfinClient:
         section_metadata_fetchers: dict[str, str] = {}
         virtual_folders = self._library_structure_api.get_virtual_folders() or []
         for folder in virtual_folders:
-            section_id = str(folder.item_id or "")
-            if not section_id:
-                continue
+            # For whatever reason, the API returns this as a string instead of a UUID
+            section_id = str(UUID(str(folder.item_id or "")))
 
-            collection_type = str(folder.collection_type or "")
-            if collection_type != "tvshows":
+            if folder.collection_type is not CollectionTypeOptions.TVSHOWS:
                 continue
 
             library_options = folder.library_options
@@ -406,19 +406,27 @@ class JellyfinClient:
 
             metadata_fetcher: str | None = None
             for option in type_options:
-                media_type = str(option.type or "")
-                if media_type != "Series":
+                if option.type != "Series":
                     continue
 
-                fetchers = option.metadata_fetcher_order or option.metadata_fetchers
-                if not fetchers:
-                    continue
+                ordered_fetchers = option.metadata_fetcher_order or []
+                enabled_fetchers = option.metadata_fetchers
+                enabled_set = set(enabled_fetchers) if enabled_fetchers else None
 
-                for fetcher in fetchers:
-                    candidate = str(fetcher)
-                    if candidate:
-                        metadata_fetcher = candidate
+                if ordered_fetchers:
+                    for fetcher in ordered_fetchers:
+                        if not fetcher:
+                            continue
+                        if enabled_set is not None and fetcher not in enabled_set:
+                            continue
+                        metadata_fetcher = fetcher
                         break
+                else:
+                    for fetcher in enabled_fetchers or []:
+                        if fetcher:
+                            metadata_fetcher = fetcher
+                            break
+
                 if metadata_fetcher:
                     break
 

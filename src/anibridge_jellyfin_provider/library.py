@@ -58,9 +58,8 @@ _PROVIDER_ID_MAP = {
 }
 
 _STRICT_FETCHER_TO_PROVIDER = {
-    "AniDb": "anidb",
+    "AniDB": "anidb",
     "AniList": "anilist",
-    "Tvdb": "tvdb_show",
     "TheTVDB": "tvdb_show",
     "TheMovieDb": "tmdb_show",
     "IMDb": "imdb_show",
@@ -221,7 +220,7 @@ class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
             return None
         try:
             return round(float(rating) * 10)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     @property
@@ -230,7 +229,7 @@ class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
         user_data = self._item.user_data
         try:
             return int((user_data.play_count if user_data else 0) or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0
 
     async def history(self) -> Sequence[HistoryEntry]:
@@ -451,7 +450,7 @@ class JellyfinLibraryProvider(LibraryProvider):
         self._client_user = str(user)
         self._section_filter = list(self.config.get("sections") or [])
         self._genre_filter = list(self.config.get("genres") or [])
-        self._strict = bool(self.config.get("strict") or False)
+        self._strict = bool(self.config.get("strict") or True)
         self._client = self._create_client()
         self._user: LibraryUser | None = None
 
