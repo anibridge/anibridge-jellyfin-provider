@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
 
-# The jellyfin-sdk package uses dynamic that cannot be type-checked statically
+# The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
 if TYPE_CHECKING:
     from jellyfin.generated.api_10_11 import (
         ApiClient,
@@ -151,7 +151,7 @@ class JellyfinClient:
                 item
                 for item in filtered
                 if (
-                    last_modified := _parse_datetime(
+                    last_modified := self._normalize_local_datetime(
                         item.date_last_media_added or item.date_created
                     )
                 )
@@ -233,14 +233,14 @@ class JellyfinClient:
             for episode in episodes:
                 if not episode.id:
                     continue
-                last_played = _parse_datetime(
+                last_played = self._normalize_local_datetime(
                     episode.user_data.last_played_date if episode.user_data else None
                 )
                 if last_played is None:
                     continue
                 history.append((str(episode.id), last_played))
         else:
-            last_played = _parse_datetime(
+            last_played = self._normalize_local_datetime(
                 item.user_data.last_played_date if item.user_data else None
             )
             history = [(str(item.id), last_played)] if last_played is not None else []
@@ -364,18 +364,12 @@ class JellyfinClient:
             if any(genre.lower() in self._genre_filter for genre in (item.genres or []))
         ]
 
-
-def _parse_datetime(value: str | datetime | None) -> datetime | None:
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    try:
-        value = value.replace("Z", "+00:00")
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        _LOG.debug("Failed to parse datetime: %s", value)
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed
+    @staticmethod
+    def _normalize_local_datetime(value: datetime | None) -> datetime | None:
+        """Return a timezone-aware datetime."""
+        if value is None:
+            return value
+        local_tz = datetime.now().astimezone().tzinfo or UTC
+        if value.tzinfo is None:
+            return value.replace(tzinfo=local_tz)
+        return value.astimezone(local_tz)
