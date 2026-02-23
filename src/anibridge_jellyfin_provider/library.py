@@ -42,11 +42,15 @@ _LOG = getLogger(__name__)
 
 _PROVIDER_ID_MAP = {
     "movie": {
+        "anidb": "anidb",
+        "anilist": "anilist",
         "imdb": "imdb_movie",
         "tmdb": "tmdb_movie",
         "tvdb": "tvdb_movie",
     },
     "show": {
+        "anidb": "anidb",
+        "anilist": "anilist",
         "imdb": "imdb_show",
         "tmdb": "tmdb_show",
         "tvdb": "tvdb_show",
@@ -241,6 +245,17 @@ class JellyfinLibraryMovie(
         """Initialize the movie wrapper."""
         super().__init__(provider, section, item, MediaKind.MOVIE)
 
+    def mapping_descriptors(self) -> Sequence[MappingDescriptor]:
+        """Return mapping descriptors for this movie, with no scope."""
+        descriptors: list[MappingDescriptor] = []
+        for descriptor in super().mapping_descriptors():
+            if descriptor[0] == "anidb":
+                # The anidb plugin will always use the "REGULAR" scope for movies
+                descriptors.append((descriptor[0], descriptor[1], "R"))
+            else:
+                descriptors.append(descriptor)
+        return tuple(descriptors)
+
 
 class JellyfinLibraryShow(JellyfinLibraryEntry, LibraryShow["JellyfinLibraryProvider"]):
     """Concrete `LibraryShow` wrapper for Jellyfin series objects."""
@@ -326,8 +341,15 @@ class JellyfinLibrarySeason(
     def mapping_descriptors(self) -> Sequence[MappingDescriptor]:
         """Return mapping descriptors with season scopes applied."""
         descriptors: list[MappingDescriptor] = []
-        for descriptor in self.show().mapping_descriptors():
-            descriptors.append((descriptor[0], descriptor[1], f"s{self.index}"))
+        for provider, entry_id, _ in self.show().mapping_descriptors():
+            scope: str | None = f"s{self.index}"
+            if provider == "anilist":
+                scope = None
+            elif provider == "anidb":
+                # The anidb plugin maps the "SPECIAL" scope to season 0. It does not
+                # support anything besides "SPECIAL" and "REGULAR" scopes
+                scope = "S" if self.index == 0 else "R"
+            descriptors.append((provider, entry_id, scope))
         return tuple(descriptors)
 
 

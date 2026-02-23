@@ -179,7 +179,12 @@ def library_setup(monkeypatch: pytest.MonkeyPatch):
         id="movie-1",
         name="Movie One",
         type="Movie",
-        provider_ids={"Imdb": "tt123", "Tmdb": "789"},
+        provider_ids={
+            "AniDb": "1111",
+            "AniList": "2222",
+            "Imdb": "tt123",
+            "Tmdb": "789",
+        },
         user_data=FakeUserData(
             played=True,
             play_count=2,
@@ -195,7 +200,7 @@ def library_setup(monkeypatch: pytest.MonkeyPatch):
         id="show-1",
         name="Show One",
         type="Series",
-        provider_ids={"Tvdb": "55"},
+        provider_ids={"AniDb": "3333", "AniList": "4444", "Tvdb": "55"},
         user_data=FakeUserData(
             played=False,
             play_count=0,
@@ -296,10 +301,16 @@ async def test_mapping_descriptors_and_watch_state(library_setup):
     show_item = (await provider.list_items(show_section))[0]
 
     assert movie_item.mapping_descriptors() == (
+        ("anidb", "1111", "R"),
+        ("anilist", "2222", None),
         ("imdb_movie", "tt123", None),
         ("tmdb_movie", "789", None),
     )
-    assert show_item.mapping_descriptors() == (("tvdb_show", "55", None),)
+    assert show_item.mapping_descriptors() == (
+        ("anidb", "3333", None),
+        ("anilist", "4444", None),
+        ("tvdb_show", "55", None),
+    )
     assert show_item.on_watching is True
     assert movie_item.on_watchlist is True
     assert movie_item.user_rating == 80
@@ -320,7 +331,11 @@ async def test_season_and_episode_mapping_scopes(library_setup):
     assert season.index == 1
 
     descriptors = season.mapping_descriptors()
-    assert descriptors == (("tvdb_show", "55", "s1"),)
+    assert descriptors == (
+        ("anidb", "3333", "R"),
+        ("anilist", "4444", None),
+        ("tvdb_show", "55", "s1"),
+    )
 
     episodes = season.episodes()
     assert len(episodes) == 1
