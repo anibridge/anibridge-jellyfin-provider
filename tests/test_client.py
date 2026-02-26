@@ -52,6 +52,7 @@ class _FakeUserData:
     play_count: int = 0
     playback_position_ticks: int = 0
     is_favorite: bool = False
+    last_played_date: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -59,6 +60,7 @@ class _FakeItem:
     id: UUID | str | None
     type: BaseItemKind | str
     collection_type: CollectionType | str | None = None
+    parent_id: UUID | None = None
     series_id: UUID | None = None
     user_data: _FakeUserData | None = None
     date_last_media_added: datetime | None = None
@@ -180,34 +182,30 @@ def test_is_on_continue_watching_checks_next_up_for_episode_series() -> None:
 
 @pytest.mark.asyncio
 async def test_list_section_items_require_watched_includes_series_with_activity():
-    """TV shows should match when any user activity exists on show or episodes."""
-    watched_by_episode = _FakeItem(
-        id="show-1",
-        type=BaseItemKind.SERIES,
-        user_data=_FakeUserData(played=False, play_count=0),
+    """TV watched filtering should prefetch watched episodes and hydrate root shows."""
+    show_1_id = uuid4()
+    show_2_id = uuid4()
+    episode_1_id = uuid4()
+    episode_2_id = uuid4()
+
+    watched_episode_1 = _FakeItem(
+        id=episode_1_id,
+        type=BaseItemKind.EPISODE,
+        collection_type=CollectionType.TVSHOWS,
     )
-    watched_by_show = _FakeItem(
-        id="show-2",
-        type=BaseItemKind.SERIES,
-        user_data=_FakeUserData(played=True, play_count=1),
+    watched_episode_1.parent_id = show_1_id
+    watched_episode_2 = _FakeItem(
+        id=episode_2_id,
+        type=BaseItemKind.EPISODE,
+        collection_type=CollectionType.TVSHOWS,
     )
-    unwatched = _FakeItem(
-        id="show-3",
-        type=BaseItemKind.SERIES,
-        user_data=_FakeUserData(played=False, play_count=0),
-    )
-    partial_by_show = _FakeItem(
-        id="show-4",
-        type=BaseItemKind.SERIES,
-        user_data=_FakeUserData(playback_position_ticks=10),
-    )
-    favorite_by_show = _FakeItem(
-        id="show-5",
-        type=BaseItemKind.SERIES,
-        user_data=_FakeUserData(is_favorite=True),
-    )
+    watched_episode_2.parent_id = show_2_id
+
+    show_1 = _FakeItem(id=show_1_id, type=BaseItemKind.SERIES)
+    show_2 = _FakeItem(id=show_2_id, type=BaseItemKind.SERIES)
+
     section = _FakeItem(
-        id="section-1",
+        id=uuid4(),
         type=BaseItemKind.COLLECTIONFOLDER,
         collection_type=CollectionType.TVSHOWS,
     )
@@ -218,52 +216,142 @@ async def test_list_section_items_require_watched_includes_series_with_activity(
         token="token",
         user="demo",
     )
-    client._fetch_section_items = cast(
-        Any,
-        lambda _section, *, min_last_modified=None, require_watched=False, keys=None: [
-            watched_by_episode,
-            watched_by_show,
-            unwatched,
-            partial_by_show,
-            favorite_by_show,
-        ],
-    )
-    client.list_show_episodes = cast(
-        Any,
-        lambda *, show_id, season_id=None: (
-            [
-                _FakeItem(
-                    id="episode-1",
-                    type=BaseItemKind.EPISODE,
-                    user_data=_FakeUserData(play_count=1),
+    calls: list[dict[str, Any]] = []
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            calls.append(kwargs)
+
+            include_types = kwargs.get("include_item_types")
+            if include_types == [BaseItemKind.EPISODE]:
+                return cast(
+                    Any,
+                    type(
+                        "_Response",
+                        (),
+                        {"items": [watched_episode_1, watched_episode_2]},
+                    )(),
                 )
-            ]
-            if show_id == "show-1"
-            else []
-        ),
-    )
+
+            return cast(Any, type("_Response", (), {"items": [show_1, show_2]})())
+
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_id = uuid4()
 
     items = await client.list_section_items(cast(Any, section), require_watched=True)
 
-    assert [item.id for item in items] == [
-        "show-1",
-        "show-2",
-        "show-4",
-        "show-5",
-    ]
+    assert [item.id for item in items] == [show_1_id, show_2_id]
+    assert len(calls) == 2
+    assert calls[0].get("include_item_types") == [BaseItemKind.EPISODE]
+    assert calls[0].get("is_played") is True
+    assert set(calls[1].get("ids") or []) == {show_1_id, show_2_id}
 
 
 @pytest.mark.asyncio
-async def test_list_section_items_min_last_modified_prefers_date_last_saved():
-    """Incremental filtering should use Jellyfin's min_date_last_saved argument."""
+async def test_list_section_items_require_watched_uses_episode_activity_for_cutoff():
+    """TV watched cutoff should be applied to watched episodes, not series metadata."""
     now = datetime.now(UTC)
     cutoff = now - timedelta(hours=1)
 
-    item = _FakeItem(
-        id="show-1",
+    old_series_id = uuid4()
+    recent_series_id = uuid4()
+
+    watched_old = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.EPISODE,
+        parent_id=old_series_id,
+        user_data=_FakeUserData(last_played_date=now - timedelta(days=2)),
+        date_last_media_added=now - timedelta(days=3),
+        date_created=now - timedelta(days=5),
+    )
+    watched_recent = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.EPISODE,
+        parent_id=recent_series_id,
+        user_data=_FakeUserData(last_played_date=now),
+        date_last_media_added=now - timedelta(days=7),
+        date_created=now - timedelta(days=9),
+    )
+
+    old_series = _FakeItem(
+        id=old_series_id,
+        type=BaseItemKind.SERIES,
+        date_last_media_added=now - timedelta(days=30),
+        date_created=now - timedelta(days=60),
+    )
+    recent_series = _FakeItem(
+        id=recent_series_id,
+        type=BaseItemKind.SERIES,
+        date_last_media_added=now - timedelta(days=30),
+        date_created=now - timedelta(days=60),
+    )
+
+    section = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.COLLECTIONFOLDER,
+        collection_type=CollectionType.TVSHOWS,
+    )
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            include_types = kwargs.get("include_item_types")
+            if include_types == [BaseItemKind.EPISODE]:
+                return cast(
+                    Any,
+                    type("_Response", (), {"items": [watched_old, watched_recent]})(),
+                )
+            ids = set(kwargs.get("ids") or [])
+            series_items = [
+                item
+                for item in [old_series, recent_series]
+                if not ids or item.id in ids
+            ]
+            return cast(
+                Any,
+                type("_Response", (), {"items": series_items})(),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_id = uuid4()
+
+    items = await client.list_section_items(
+        cast(Any, section), require_watched=True, min_last_modified=cutoff
+    )
+
+    assert [item.id for item in items] == [recent_series_id]
+
+
+@pytest.mark.asyncio
+async def test_list_section_items_min_last_modified_filters_client_side():
+    """Incremental filtering should use item/user timestamps on the client side."""
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(hours=1)
+
+    stale_item = _FakeItem(
+        id="show-old",
+        type=BaseItemKind.SERIES,
+        date_last_media_added=now - timedelta(days=3),
+        date_created=now - timedelta(days=5),
+        user_data=_FakeUserData(last_played_date=now - timedelta(days=2)),
+    )
+    recently_added = _FakeItem(
+        id="show-added",
         type=BaseItemKind.SERIES,
         date_last_media_added=now,
-        date_created=now,
+        date_created=now - timedelta(days=10),
+    )
+    recently_watched = _FakeItem(
+        id="show-watched",
+        type=BaseItemKind.SERIES,
+        date_last_media_added=now - timedelta(days=10),
+        date_created=now - timedelta(days=10),
+        user_data=_FakeUserData(last_played_date=now),
     )
     section = _FakeItem(
         id="section-1",
@@ -282,7 +370,14 @@ async def test_list_section_items_min_last_modified_prefers_date_last_saved():
     class _FakeItemsApi:
         def get_items(self, **kwargs):
             captured_kwargs.update(kwargs)
-            return cast(Any, type("_Response", (), {"items": [item]})())
+            return cast(
+                Any,
+                type(
+                    "_Response",
+                    (),
+                    {"items": [stale_item, recently_added, recently_watched]},
+                )(),
+            )
 
     client._items_api = cast(Any, _FakeItemsApi())
     client._user_id = cast(Any, "user-1")
@@ -291,8 +386,8 @@ async def test_list_section_items_min_last_modified_prefers_date_last_saved():
         cast(Any, section), min_last_modified=cutoff
     )
 
-    assert [entry.id for entry in items] == ["show-1"]
-    assert captured_kwargs.get("min_date_last_saved") == cutoff
+    assert [entry.id for entry in items] == ["show-added", "show-watched"]
+    assert captured_kwargs.get("min_date_last_saved") is None
 
 
 @pytest.mark.asyncio
@@ -303,7 +398,7 @@ async def test_list_section_items_passes_supported_server_filters():
         type=BaseItemKind.COLLECTIONFOLDER,
         collection_type=CollectionType.MOVIES,
     )
-    key = str(uuid4())
+    key = uuid4()
     item = _FakeItem(
         id=key,
         type=BaseItemKind.MOVIE,
@@ -311,11 +406,19 @@ async def test_list_section_items_passes_supported_server_filters():
         genres=["action"],
     )
 
-    captured_kwargs: dict[str, object] = {}
+    captured_calls: list[dict[str, object]] = []
 
     class _FakeItemsApi:
         def get_items(self, **kwargs):
-            captured_kwargs.update(kwargs)
+            captured_calls.append(kwargs)
+
+            include_types = kwargs.get("include_item_types")
+            if (
+                include_types == [BaseItemKind.MOVIE]
+                and kwargs.get("is_played") is True
+            ):
+                return cast(Any, type("_Response", (), {"items": [item]})())
+
             return cast(Any, type("_Response", (), {"items": [item]})())
 
     client = JellyfinClient(
@@ -331,10 +434,11 @@ async def test_list_section_items_passes_supported_server_filters():
     items = await client.list_section_items(
         cast(Any, section),
         require_watched=True,
-        keys=(key,),
+        keys=(str(key),),
     )
 
     assert [entry.id for entry in items] == [key]
-    assert captured_kwargs.get("genres") == ["action"]
-    assert captured_kwargs.get("is_played") is None
-    assert captured_kwargs.get("ids") == [UUID(key)]
+    assert len(captured_calls) == 1
+    assert captured_calls[0].get("is_played") is True
+    assert captured_calls[0].get("genres") == ["action"]
+    assert captured_calls[0].get("ids") == [key]

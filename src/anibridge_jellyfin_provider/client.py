@@ -56,16 +56,14 @@ class JellyfinClient:
     """High-level Jellyfin client wrapper used by the library provider."""
 
     ITEM_FIELDS: ClassVar[tuple[ItemFields, ...]] = (
-        ItemFields.PATH,
-        ItemFields.GENRES,
         ItemFields.SORTNAME,
-        ItemFields.TAGLINES,
         ItemFields.DATECREATED,
+        ItemFields.DATELASTMEDIAADDED,
         ItemFields.DATELASTSAVED,
-        ItemFields.OVERVIEW,
         ItemFields.PROVIDERIDS,
         ItemFields.PARENTID,
     )
+    PARENT_ID_FIELD: ClassVar[list[ItemFields]] = [ItemFields.PARENTID]
 
     def __init__(
         self,
@@ -171,25 +169,14 @@ class JellyfinClient:
         items = await asyncio.to_thread(
             self._fetch_section_items,
             section,
-            min_last_modified=min_last_modified,
+            min_last_modified=self._normalize_local_datetime(min_last_modified),
             require_watched=require_watched,
             keys=keys,
         )
         filtered = list(items)
 
-        if require_watched:
-            filtered = [
-                item
-                for item in filtered
-                if self._item_has_user_activity(
-                    item,
-                    section_collection_type=section.collection_type,
-                )
-            ]
-
         if keys is not None:
-            allowed = set(keys)
-            filtered = [item for item in filtered if item.id in allowed]
+            filtered = [item for item in filtered if item.id in keys]
 
         return tuple(filtered)
 
@@ -387,48 +374,157 @@ class JellyfinClient:
         require_watched: bool = False,
         keys: Sequence[str] | None = None,
     ) -> list[BaseItemDto]:
+        if self._user_id is None or self._items_api is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+
+        user_id = self._user_id
+        items_api = self._items_api
         include_types = (
             [BaseItemKind.MOVIE]
             if section.collection_type == CollectionType.MOVIES
             else [BaseItemKind.SERIES]
         )
-        if self._items_api is None:
-            raise RuntimeError("Jellyfin client has not been initialized")
-        if self._user_id is None:
-            raise RuntimeError("Jellyfin client has not been initialized")
-        ids: list[UUID] | None = None
-        if keys:
-            parsed_ids: list[UUID] = []
-            for key in keys:
-                try:
-                    parsed_ids.append(UUID(str(key)))
-                except TypeError, ValueError:
-                    self.log.warning("Invalid item id in keys filter: %s", key)
-            if parsed_ids:
-                ids = parsed_ids
+        genres = list(self._genre_filter) if self._genre_filter else None
+        ids_filter: list[UUID] | None = self._parse_uuid_keys(keys)
+        item_fields = list(self.ITEM_FIELDS)
 
-        response = self._items_api.get_items(
-            user_id=self._user_id,
+        def _get_items(
+            *,
+            include_item_types: list[BaseItemKind],
+            fields: list[ItemFields],
+            parent_id: UUID | None = None,
+            ids: list[UUID] | None = None,
+            is_played: bool | None = None,
+            enable_user_data: bool = False,
+            enable_images: bool = False,
+        ) -> list[BaseItemDto]:
+            response = items_api.get_items(
+                user_id=user_id,
+                parent_id=parent_id,
+                include_item_types=include_item_types,
+                recursive=True,
+                fields=fields,
+                enable_user_data=enable_user_data,
+                enable_images=enable_images,
+                is_played=is_played,
+                genres=genres,
+                ids=ids,
+            )
+            return list(response.items or []) if response else []
+
+        if not require_watched:
+            items = _get_items(
+                include_item_types=include_types,
+                fields=item_fields,
+                parent_id=section.id,
+                enable_user_data=True,
+                enable_images=True,
+                ids=ids_filter,
+            )
+            return self._filter_items_by_last_modified(items, min_last_modified)
+
+        if section.collection_type == CollectionType.MOVIES:
+            items = _get_items(
+                include_item_types=[BaseItemKind.MOVIE],
+                fields=item_fields,
+                parent_id=section.id,
+                is_played=True,
+                enable_user_data=True,
+                enable_images=True,
+                ids=ids_filter,
+            )
+            return self._filter_items_by_last_modified(items, min_last_modified)
+
+        watched_items = _get_items(
+            include_item_types=[BaseItemKind.EPISODE],
+            fields=item_fields,
             parent_id=section.id,
+            is_played=True,
+            enable_user_data=True,
+            ids=ids_filter,
+        )
+        watched_items = self._filter_items_by_last_modified(
+            watched_items, min_last_modified
+        )
+        if not watched_items:
+            return []
+
+        series_ids: set[UUID] = set()
+        unresolved_parent_ids: set[UUID] = set()
+        for watched_item in watched_items:
+            if watched_item.series_id:
+                series_ids.add(watched_item.series_id)
+            elif watched_item.parent_id:
+                unresolved_parent_ids.add(watched_item.parent_id)
+
+        if not series_ids and not unresolved_parent_ids:
+            return []
+
+        initial_series_ids = series_ids | unresolved_parent_ids
+        items = _get_items(
             include_item_types=include_types,
-            recursive=True,
-            fields=list(self.ITEM_FIELDS),
+            fields=item_fields,
+            ids=list(initial_series_ids),
             enable_user_data=True,
             enable_images=True,
-            min_date_last_saved=min_last_modified,
-            genres=list(self._genre_filter) if self._genre_filter else None,
-            ids=ids,
         )
-        items: list[BaseItemDto] = list(response.items or []) if response else []
-
-        if not self._genre_filter:
+        if items or not unresolved_parent_ids:
             return items
 
-        return [
-            item
-            for item in items
-            if any(genre.lower() in self._genre_filter for genre in (item.genres or []))
-        ]
+        seasons = _get_items(
+            include_item_types=[BaseItemKind.SEASON],
+            fields=self.PARENT_ID_FIELD,
+            ids=list(unresolved_parent_ids),
+        )
+        season_series_ids = {item.parent_id for item in seasons if item.parent_id}
+        if not season_series_ids:
+            return []
+
+        items = _get_items(
+            include_item_types=include_types,
+            fields=item_fields,
+            ids=list(season_series_ids),
+            enable_user_data=True,
+            enable_images=True,
+        )
+        return items
+
+    def _filter_items_by_last_modified(
+        self, items: Sequence[BaseItemDto], min_last_modified: datetime | None
+    ) -> list[BaseItemDto]:
+        """Filter items by last modified date."""
+        if min_last_modified is None:
+            return list(items)
+
+        filtered: list[BaseItemDto] = []
+        for item in items:
+            user_data = item.user_data
+            candidate_datetimes = (
+                item.date_last_media_added,
+                item.date_created,
+                user_data.last_played_date if user_data else None,
+            )
+            for value in candidate_datetimes:
+                normalized = self._normalize_local_datetime(value)
+                if normalized is not None and normalized >= min_last_modified:
+                    filtered.append(item)
+
+        return filtered
+
+    def _parse_uuid_keys(self, keys: Sequence[str] | None) -> list[UUID] | None:
+        if not keys:
+            return None
+
+        parsed_ids: list[UUID] = []
+        for key in keys:
+            try:
+                parsed_key = UUID(str(key))
+            except TypeError, ValueError:
+                self.log.warning("Invalid item id in keys filter: %s", key)
+                continue
+            parsed_ids.append(parsed_key)
+
+        return parsed_ids
 
     def _load_show_metadata_fetchers(self) -> dict[str, str]:
         """Get the top-priority TV metadata fetcher for each section if known."""
