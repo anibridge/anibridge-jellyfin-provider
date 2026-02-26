@@ -1,5 +1,6 @@
 """Tests for the Jellyfin library provider integration."""
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -8,6 +9,13 @@ import pytest
 from anibridge.library import LibraryShow
 
 import anibridge_jellyfin_provider.library as library_module
+
+
+def _test_logger() -> logging.Logger:
+    logger = logging.getLogger("tests.anibridge_jellyfin_provider.client")
+    logger.handlers = []
+    logger.addHandler(logging.NullHandler())
+    return logger
 
 
 class FakeJellyfinClient:
@@ -280,7 +288,8 @@ def library_setup(monkeypatch: pytest.MonkeyPatch):
             "token": "token",
             "user": "demo",
             "strict": False,
-        }
+        },
+        logger=_test_logger(),
     )
     return provider, fake_client, movie, show
 
@@ -422,7 +431,8 @@ async def test_strict_mode_filters_show_mappings_to_top_source(
             "token": "token",
             "user": "demo",
             "strict": True,
-        }
+        },
+        logger=_test_logger(),
     )
     await provider.initialize()
 
