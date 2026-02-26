@@ -22,6 +22,7 @@ from anibridge.library import (
     library_provider,
 )
 from anibridge.library.base import MappingDescriptor
+from jellyfin.generated.api_10_10 import BaseItemKind
 
 from anibridge_jellyfin_provider.client import JellyfinClient
 from anibridge_jellyfin_provider.webhook import (
@@ -625,13 +626,13 @@ class JellyfinLibraryProvider(LibraryProvider):
     ) -> LibraryEntry:
         """Wrap a Jellyfin item in the appropriate library entry class."""
         item_type = item.type
-        if item_type == "Episode":
+        if item_type == BaseItemKind.EPISODE:
             return JellyfinLibraryEpisode(self, section, item)
-        if item_type == "Season":
+        if item_type == BaseItemKind.SEASON:
             return JellyfinLibrarySeason(self, section, item)
-        if item_type == "Series":
+        if item_type == BaseItemKind.SERIES:
             return JellyfinLibraryShow(self, section, item)
-        if item_type == "Movie":
+        if item_type == BaseItemKind.MOVIE:
             return JellyfinLibraryMovie(self, section, item)
         raise TypeError(f"Unsupported Jellyfin media type: {item_type!r}")
 
