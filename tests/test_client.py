@@ -50,6 +50,8 @@ def _test_logger() -> logging.Logger:
 class _FakeUserData:
     played: bool = False
     play_count: int = 0
+    playback_position_ticks: int = 0
+    is_favorite: bool = False
 
 
 @dataclass(slots=True)
@@ -121,7 +123,7 @@ def test_load_show_metadata_fetchers_uses_enabled_when_order_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_list_section_items_require_watched_includes_series_with_activity():
-    """TV shows should match watched-only filters when any episode has play activity."""
+    """TV shows should match when any user activity exists on show or episodes."""
     watched_by_episode = _FakeItem(
         id="show-1",
         type=BaseItemKind.SERIES,
@@ -136,6 +138,16 @@ async def test_list_section_items_require_watched_includes_series_with_activity(
         id="show-3",
         type=BaseItemKind.SERIES,
         user_data=_FakeUserData(played=False, play_count=0),
+    )
+    partial_by_show = _FakeItem(
+        id="show-4",
+        type=BaseItemKind.SERIES,
+        user_data=_FakeUserData(playback_position_ticks=10),
+    )
+    favorite_by_show = _FakeItem(
+        id="show-5",
+        type=BaseItemKind.SERIES,
+        user_data=_FakeUserData(is_favorite=True),
     )
     section = _FakeItem(
         id="section-1",
@@ -155,6 +167,8 @@ async def test_list_section_items_require_watched_includes_series_with_activity(
             watched_by_episode,
             watched_by_show,
             unwatched,
+            partial_by_show,
+            favorite_by_show,
         ],
     )
     client.list_show_episodes = cast(
@@ -174,7 +188,12 @@ async def test_list_section_items_require_watched_includes_series_with_activity(
 
     items = await client.list_section_items(cast(Any, section), require_watched=True)
 
-    assert [item.id for item in items] == ["show-1", "show-2"]
+    assert [item.id for item in items] == [
+        "show-1",
+        "show-2",
+        "show-4",
+        "show-5",
+    ]
 
 
 @pytest.mark.asyncio
@@ -231,7 +250,7 @@ async def test_list_section_items_passes_supported_server_filters():
     item = _FakeItem(
         id=key,
         type=BaseItemKind.MOVIE,
-        user_data=_FakeUserData(play_count=1),
+        user_data=_FakeUserData(is_favorite=True),
         genres=["action"],
     )
 
@@ -260,5 +279,5 @@ async def test_list_section_items_passes_supported_server_filters():
 
     assert [entry.id for entry in items] == [key]
     assert captured_kwargs.get("genres") == ["action"]
-    assert captured_kwargs.get("is_played") is True
+    assert captured_kwargs.get("is_played") is None
     assert captured_kwargs.get("ids") == [UUID(key)]

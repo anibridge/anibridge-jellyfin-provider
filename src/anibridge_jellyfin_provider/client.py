@@ -177,7 +177,7 @@ class JellyfinClient:
             filtered = [
                 item
                 for item in filtered
-                if self._item_has_watched_activity(
+                if self._item_has_user_activity(
                     item,
                     section_collection_type=section.collection_type,
                 )
@@ -397,9 +397,6 @@ class JellyfinClient:
             enable_images=True,
             min_date_last_saved=min_last_modified,
             genres=list(self._genre_filter) if self._genre_filter else None,
-            is_played=bool(
-                require_watched and section.collection_type == CollectionType.MOVIES
-            ),
             ids=ids,
         )
         items: list[BaseItemDto] = list(response.items or []) if response else []
@@ -463,11 +460,11 @@ class JellyfinClient:
 
         return section_metadata_fetchers
 
-    def _item_has_watched_activity(
+    def _item_has_user_activity(
         self, item: BaseItemDto, *, section_collection_type: CollectionType | None
     ) -> bool:
-        """Return true if item has watched state."""
-        if self._has_user_play_activity(item.user_data):
+        """Return true if item has user activity (played, partial, favorite)."""
+        if self._has_user_activity(item.user_data):
             return True
 
         if (
@@ -481,19 +478,24 @@ class JellyfinClient:
             episodes = self.list_show_episodes(show_id=item.id)
         except Exception:
             self.log.exception(
-                "Failed to load episodes while checking watched state for show %s",
+                "Failed to load episodes while checking user activity for show %s",
                 item.id,
             )
             return False
 
-        return any(self._has_user_play_activity(e.user_data) for e in episodes)
+        return any(self._has_user_activity(e.user_data) for e in episodes)
 
     @staticmethod
-    def _has_user_play_activity(user_data: UserItemDataDto | None) -> bool:
-        """Return true when user data indicates at least one play."""
+    def _has_user_activity(user_data: UserItemDataDto | None) -> bool:
+        """Return true when user data indicates any relevant user activity."""
         if user_data is None:
             return False
-        return bool(user_data.played or user_data.play_count)
+        return bool(
+            user_data.played
+            or user_data.play_count
+            or user_data.playback_position_ticks
+            or user_data.is_favorite
+        )
 
     @staticmethod
     def _normalize_local_datetime(value: datetime | None) -> datetime | None:
