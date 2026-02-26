@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         ApiClient,
         BaseItemDto,
         BaseItemKind,
+        CollectionType,
         CollectionTypeOptions,
         Configuration,
         ItemFields,
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
         LibraryStructureApi,
         UserApi,
         UserDto,
+        UserItemDataDto,
         UserLibraryApi,
         UserViewsApi,
     )
@@ -31,6 +33,7 @@ else:
         ApiClient,
         BaseItemDto,
         BaseItemKind,
+        CollectionType,
         CollectionTypeOptions,
         Configuration,
         ItemFields,
@@ -38,6 +41,7 @@ else:
         LibraryStructureApi,
         UserApi,
         UserDto,
+        UserItemDataDto,
         UserLibraryApi,
         UserViewsApi,
     )
@@ -241,10 +245,10 @@ class JellyfinClient:
         if item.id is None:
             return ()
 
-        if item.type in {"Season", "Series"}:
+        if item.type in {BaseItemKind.SEASON, BaseItemKind.SERIES}:
             episodes = self.list_show_episodes(
                 show_id=item.id,
-                season_id=item.id if item.type == "Season" else None,
+                season_id=item.id if item.type == BaseItemKind.SEASON else None,
             )
             history = []
             for episode in episodes:
@@ -347,8 +351,10 @@ class JellyfinClient:
 
         sections: list[BaseItemDto] = []
         for item in items:
-            collection = (item.collection_type or "").lower()
-            if collection not in {"movies", "tvshows"}:
+            if item.collection_type not in {
+                CollectionType.MOVIES,
+                CollectionType.TVSHOWS,
+            }:
                 continue
             if (
                 self._section_filter
@@ -361,7 +367,9 @@ class JellyfinClient:
     def _fetch_section_items(self, section: BaseItemDto) -> list[BaseItemDto]:
         collection = (section.collection_type or "").lower()
         include_types = (
-            [BaseItemKind.MOVIE] if collection == "movies" else [BaseItemKind.SERIES]
+            [BaseItemKind.MOVIE]
+            if section.collection_type == CollectionType.MOVIES
+            else [BaseItemKind.SERIES]
         )
         if self._items_api is None:
             raise RuntimeError("Jellyfin client has not been initialized")
@@ -398,7 +406,7 @@ class JellyfinClient:
             # For whatever reason, the API returns this as a string instead of a UUID
             section_id = str(UUID(str(folder.item_id or "")))
 
-            if folder.collection_type is not CollectionTypeOptions.TVSHOWS:
+            if folder.collection_type != CollectionTypeOptions.TVSHOWS:
                 continue
 
             library_options = folder.library_options
@@ -408,7 +416,7 @@ class JellyfinClient:
 
             metadata_fetcher: str | None = None
             for option in type_options:
-                if option.type != "Series":
+                if option.type != BaseItemKind.SERIES:
                     continue
 
                 ordered_fetchers = option.metadata_fetcher_order or []
