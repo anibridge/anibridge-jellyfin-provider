@@ -164,28 +164,23 @@ class JellyfinClient:
         keys: Sequence[str] | None = None,
     ) -> Sequence[BaseItemDto]:
         """Return Jellyfin items for the provided section with filtering applied."""
-        items = await asyncio.to_thread(self._fetch_section_items, section)
+        items = await asyncio.to_thread(
+            self._fetch_section_items,
+            section,
+            min_last_modified=min_last_modified,
+            require_watched=require_watched,
+            keys=keys,
+        )
         filtered = list(items)
-
-        if min_last_modified is not None:
-            filtered = [
-                item
-                for item in filtered
-                if (
-                    last_modified := self._normalize_local_datetime(
-                        item.date_last_media_added or item.date_created
-                    )
-                )
-                is None
-                or last_modified >= min_last_modified
-            ]
 
         if require_watched:
             filtered = [
                 item
                 for item in filtered
-                if item.user_data
-                and (item.user_data.played or (item.user_data.play_count or 0) > 0)
+                if self._item_has_watched_activity(
+                    item,
+                    section_collection_type=section.collection_type,
+                )
             ]
 
         if keys is not None:
@@ -364,8 +359,14 @@ class JellyfinClient:
             sections.append(item)
         return sections
 
-    def _fetch_section_items(self, section: BaseItemDto) -> list[BaseItemDto]:
-        collection = (section.collection_type or "").lower()
+    def _fetch_section_items(
+        self,
+        section: BaseItemDto,
+        *,
+        min_last_modified: datetime | None = None,
+        require_watched: bool = False,
+        keys: Sequence[str] | None = None,
+    ) -> list[BaseItemDto]:
         include_types = (
             [BaseItemKind.MOVIE]
             if section.collection_type == CollectionType.MOVIES
@@ -375,6 +376,17 @@ class JellyfinClient:
             raise RuntimeError("Jellyfin client has not been initialized")
         if self._user_id is None:
             raise RuntimeError("Jellyfin client has not been initialized")
+        ids: list[UUID] | None = None
+        if keys:
+            parsed_ids: list[UUID] = []
+            for key in keys:
+                try:
+                    parsed_ids.append(UUID(str(key)))
+                except TypeError, ValueError:
+                    self.log.warning("Invalid item id in keys filter: %s", key)
+            if parsed_ids:
+                ids = parsed_ids
+
         response = self._items_api.get_items(
             user_id=self._user_id,
             parent_id=section.id,
@@ -383,6 +395,12 @@ class JellyfinClient:
             fields=list(self.ITEM_FIELDS),
             enable_user_data=True,
             enable_images=True,
+            min_date_last_saved=min_last_modified,
+            genres=list(self._genre_filter) if self._genre_filter else None,
+            is_played=bool(
+                require_watched and section.collection_type == CollectionType.MOVIES
+            ),
+            ids=ids,
         )
         items: list[BaseItemDto] = list(response.items or []) if response else []
 
@@ -444,6 +462,38 @@ class JellyfinClient:
                 section_metadata_fetchers[section_id] = metadata_fetcher
 
         return section_metadata_fetchers
+
+    def _item_has_watched_activity(
+        self, item: BaseItemDto, *, section_collection_type: CollectionType | None
+    ) -> bool:
+        """Return true if item has watched state."""
+        if self._has_user_play_activity(item.user_data):
+            return True
+
+        if (
+            section_collection_type != CollectionType.TVSHOWS
+            or item.type != BaseItemKind.SERIES
+            or item.id is None
+        ):
+            return False
+
+        try:
+            episodes = self.list_show_episodes(show_id=item.id)
+        except Exception:
+            self.log.exception(
+                "Failed to load episodes while checking watched state for show %s",
+                item.id,
+            )
+            return False
+
+        return any(self._has_user_play_activity(e.user_data) for e in episodes)
+
+    @staticmethod
+    def _has_user_play_activity(user_data: UserItemDataDto | None) -> bool:
+        """Return true when user data indicates at least one play."""
+        if user_data is None:
+            return False
+        return bool(user_data.played or user_data.play_count)
 
     @staticmethod
     def _normalize_local_datetime(value: datetime | None) -> datetime | None:
