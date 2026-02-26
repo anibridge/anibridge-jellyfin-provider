@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         ItemFields,
         ItemsApi,
         LibraryStructureApi,
+        TvShowsApi,
         UserApi,
         UserDto,
         UserItemDataDto,
@@ -39,6 +40,7 @@ else:
         ItemFields,
         ItemsApi,
         LibraryStructureApi,
+        TvShowsApi,
         UserApi,
         UserDto,
         UserItemDataDto,
@@ -100,6 +102,7 @@ class JellyfinClient:
         self._user_library_api: UserLibraryApi | None = None
         self._user_views_api: UserViewsApi | None = None
         self._library_structure_api: LibraryStructureApi | None = None
+        self._tv_shows_api: TvShowsApi | None = None
         self._user_id: UUID | None = None
         self._user_name: str | None = None
         self._base_url = url.rstrip("/")
@@ -126,6 +129,7 @@ class JellyfinClient:
         self._user_library_api = None
         self._user_views_api = None
         self._library_structure_api = None
+        self._tv_shows_api = None
         self._user_id = None
         self._user_name = None
         self._sections.clear()
@@ -264,12 +268,27 @@ class JellyfinClient:
         return tuple(history)
 
     def is_on_continue_watching(self, item: BaseItemDto) -> bool:
-        """Determine whether the item appears in Jellyfin's continue watching list."""
-        user_data = item.user_data
-        if user_data and user_data.played:
+        """Determine whether the item appears in Jellyfin's Next Up deck."""
+        if self._tv_shows_api is None or self._user_id is None:
+            raise RuntimeError("Jellyfin client has not been initialized")
+
+        series_id: UUID | None = None
+        if item.type == BaseItemKind.SERIES:
+            series_id = item.id
+        elif item.type in {BaseItemKind.SEASON, BaseItemKind.EPISODE}:
+            series_id = item.series_id
+
+        if series_id is None:
             return False
+
         try:
-            return int((user_data.playback_position_ticks if user_data else 0) or 0) > 0
+            response = self._tv_shows_api.get_next_up(
+                user_id=self._user_id,
+                series_id=series_id,
+                limit=1,
+                enable_user_data=False,
+            )
+            return bool(response and response.items)
         except TypeError, ValueError:
             return False
 
@@ -319,6 +338,7 @@ class JellyfinClient:
         self._user_library_api = UserLibraryApi(self._api_client)
         self._user_views_api = UserViewsApi(self._api_client)
         self._library_structure_api = LibraryStructureApi(self._api_client)
+        self._tv_shows_api = TvShowsApi(self._api_client)
 
     def _resolve_user(self) -> UserDto:
         if self._user_api is None:

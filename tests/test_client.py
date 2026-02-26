@@ -56,9 +56,10 @@ class _FakeUserData:
 
 @dataclass(slots=True)
 class _FakeItem:
-    id: str | None
+    id: UUID | str | None
     type: BaseItemKind | str
     collection_type: CollectionType | str | None = None
+    series_id: UUID | None = None
     user_data: _FakeUserData | None = None
     date_last_media_added: datetime | None = None
     date_created: datetime | None = None
@@ -119,6 +120,62 @@ def test_load_show_metadata_fetchers_uses_enabled_when_order_missing() -> None:
     client._library_structure_api = cast(Any, _FakeLibraryStructureApi([folder]))
 
     assert client._load_show_metadata_fetchers() == {section_id: "AniDb"}
+
+
+def test_is_on_continue_watching_checks_next_up_for_series() -> None:
+    """Series should be considered on continue watching when present in Next Up."""
+    series_id = uuid4()
+
+    class _FakeTvShowsApi:
+        def get_next_up(self, **kwargs):
+            assert kwargs["series_id"] == series_id
+            response = type(
+                "_Response",
+                (),
+                {"items": [cast(Any, _FakeItem(id="ep", type=BaseItemKind.EPISODE))]},
+            )
+            return cast(
+                Any,
+                response(),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client._user_id = series_id
+
+    series = cast(Any, _FakeItem(id=series_id, type=BaseItemKind.SERIES))
+    assert client.is_on_continue_watching(series) is True
+
+
+def test_is_on_continue_watching_checks_next_up_for_episode_series() -> None:
+    """Episodes should resolve their parent series when checking Next Up."""
+    user_id = uuid4()
+    series_id = uuid4()
+
+    class _FakeTvShowsApi:
+        def get_next_up(self, **kwargs):
+            assert kwargs["series_id"] == series_id
+            return cast(Any, type("_Response", (), {"items": []})())
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client._user_id = user_id
+
+    episode = cast(
+        Any,
+        _FakeItem(id=uuid4(), type=BaseItemKind.EPISODE, series_id=series_id),
+    )
+    assert client.is_on_continue_watching(episode) is False
 
 
 @pytest.mark.asyncio
