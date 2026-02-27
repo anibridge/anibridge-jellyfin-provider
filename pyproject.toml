@@ -45,6 +45,10 @@ testpaths = ["tests"]
 addopts = "--cov=src"
 asyncio_mode = "auto"
 
+[tool.uv.build-backend]
+module-name = "anibridge"
+namespace = true
+
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
 build-backend = "uv_build"

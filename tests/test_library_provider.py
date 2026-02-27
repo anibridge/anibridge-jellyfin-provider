@@ -8,11 +8,11 @@ from typing import cast
 import pytest
 from anibridge.library import LibraryShow
 
-import anibridge_jellyfin_provider.library as library_module
+import anibridge.providers.library.jellyfin as library_module
 
 
 def _test_logger() -> logging.Logger:
-    logger = logging.getLogger("tests.anibridge_jellyfin_provider.client")
+    logger = logging.getLogger("tests.anibridge.client")
     logger.handlers = []
     logger.addHandler(logging.NullHandler())
     return logger

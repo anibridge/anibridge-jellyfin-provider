@@ -21,13 +21,13 @@ from anibridge.library import (
 )
 from anibridge.library.base import MappingDescriptor
 from anibridge.utils.types import ProviderLogger
-from jellyfin.generated.api_10_10 import BaseItemKind
 
-from anibridge_jellyfin_provider.client import JellyfinClient
-from anibridge_jellyfin_provider.webhook import (
+from anibridge.providers.library.jellyfin.client import JellyfinClient
+from anibridge.providers.library.jellyfin.webhook import (
     JellyfinWebhook,
     JellyfinWebhookNotificationType,
 )
+from jellyfin.generated.api_10_10 import BaseItemKind
 
 # The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
 if TYPE_CHECKING:

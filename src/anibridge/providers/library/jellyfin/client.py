@@ -176,7 +176,12 @@ class JellyfinClient:
         filtered = list(items)
 
         if keys is not None:
-            filtered = [item for item in filtered if item.id in keys]
+            normalized_keys = {str(key) for key in keys}
+            filtered = [
+                item
+                for item in filtered
+                if item.id is not None and str(item.id) in normalized_keys
+            ]
 
         return tuple(filtered)
 

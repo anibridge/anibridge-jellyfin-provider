@@ -1,11 +1,12 @@
 """Pytest fixtures shared across the provider test-suite."""
 
 from collections.abc import AsyncGenerator
+from logging import getLogger
 
 import pytest
 import pytest_asyncio
 
-from anibridge_jellyfin_provider.library import JellyfinLibraryProvider
+from anibridge.providers.library.jellyfin import JellyfinLibraryProvider
 
 
 @pytest.fixture()
@@ -16,7 +17,8 @@ def library_provider() -> JellyfinLibraryProvider:
             "url": "http://jellyfin.example",
             "token": "token",
             "user": "demo",
-        }
+        },
+        logger=getLogger("anibridge.providers.library.jellyfin.test"),
     )
 
 

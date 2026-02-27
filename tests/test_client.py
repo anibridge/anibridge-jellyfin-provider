@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from jellyfin.generated import BaseItemKind, CollectionType, CollectionTypeOptions
 
-from anibridge_jellyfin_provider.client import JellyfinClient
+from anibridge.providers.library.jellyfin.client import JellyfinClient
 
 
 @dataclass(slots=True)
@@ -40,7 +40,7 @@ class _FakeLibraryStructureApi:
 
 
 def _test_logger() -> logging.Logger:
-    logger = logging.getLogger("tests.anibridge_jellyfin_provider.client")
+    logger = logging.getLogger("tests.anibridge.client")
     logger.handlers = []
     logger.addHandler(logging.NullHandler())
     return logger
