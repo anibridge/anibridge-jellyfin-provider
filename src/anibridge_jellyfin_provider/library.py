@@ -18,10 +18,9 @@ from anibridge.library import (
     LibraryShow,
     LibraryUser,
     MediaKind,
-    ProviderLogger,
-    library_provider,
 )
 from anibridge.library.base import MappingDescriptor
+from anibridge.utils.types import ProviderLogger
 from jellyfin.generated.api_10_10 import BaseItemKind
 
 from anibridge_jellyfin_provider.client import JellyfinClient
@@ -425,7 +424,6 @@ class JellyfinLibraryEpisode(
         return self.season().mapping_descriptors()
 
 
-@library_provider
 class JellyfinLibraryProvider(LibraryProvider):
     """Default Jellyfin `LibraryProvider` backed by a Jellyfin server."""
 

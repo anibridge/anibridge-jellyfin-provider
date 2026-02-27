@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
 
-from anibridge.library import ProviderLogger
+from anibridge.utils.types import ProviderLogger
 
 # The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
 if TYPE_CHECKING:
