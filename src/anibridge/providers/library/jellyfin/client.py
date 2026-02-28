@@ -513,6 +513,7 @@ class JellyfinClient:
                 normalized = self._normalize_local_datetime(value)
                 if normalized is not None and normalized >= min_last_modified:
                     filtered.append(item)
+                    break
 
         return filtered
 
