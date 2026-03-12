@@ -21,7 +21,7 @@ class JellyfinProviderConfig(BaseModel):
     sections: list[str] = Field(
         default_factory=list,
         description=(
-            "A list of Plex library section names to constrain synchronization to."
+            "A list of Jellyfin library section names to constrain synchronization to."
         ),
     )
     genres: list[str] = Field(
