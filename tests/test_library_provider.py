@@ -338,7 +338,11 @@ async def test_mapping_descriptors_and_watch_state(library_setup):
         ("imdb_movie", "tt123", None),
         ("tmdb_movie", "789", None),
     )
-    assert show_item.mapping_descriptors() == (("anidb", "3333", None),)
+    assert show_item.mapping_descriptors() == (
+        ("anidb", "3333", None),
+        ("anilist", "4444", None),
+        ("tvdb_show", "55", None),
+    )
     assert show_item.on_watching is True
     assert movie_item.on_watchlist is True
     assert movie_item.user_rating == 80
@@ -359,7 +363,11 @@ async def test_season_and_episode_mapping_scopes(library_setup):
     assert season.index == 1
 
     descriptors = season.mapping_descriptors()
-    assert descriptors == (("anidb", "3333", "R"),)
+    assert descriptors == (
+        ("anidb", "3333", "R"),
+        ("anilist", "4444", None),
+        ("tvdb_show", "55", "s1"),
+    )
 
     episodes = season.episodes()
     assert len(episodes) == 1
