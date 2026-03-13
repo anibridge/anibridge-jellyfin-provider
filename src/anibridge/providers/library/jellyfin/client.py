@@ -3,11 +3,12 @@
 import asyncio
 import importlib.metadata
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
 
+from anibridge.utils.datetime import normalize_local_datetime
 from anibridge.utils.types import ProviderLogger
 
 # The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
@@ -169,7 +170,7 @@ class JellyfinClient:
         items = await asyncio.to_thread(
             self._fetch_section_items,
             section,
-            min_last_modified=self._normalize_local_datetime(min_last_modified),
+            min_last_modified=normalize_local_datetime(min_last_modified),
             require_watched=require_watched,
             keys=keys,
         )
@@ -245,14 +246,14 @@ class JellyfinClient:
             for episode in episodes:
                 if not episode.id:
                     continue
-                last_played = self._normalize_local_datetime(
+                last_played = normalize_local_datetime(
                     episode.user_data.last_played_date if episode.user_data else None
                 )
                 if last_played is None:
                     continue
                 history.append((str(episode.id), last_played))
         else:
-            last_played = self._normalize_local_datetime(
+            last_played = normalize_local_datetime(
                 item.user_data.last_played_date if item.user_data else None
             )
             history = [(str(item.id), last_played)] if last_played is not None else []
@@ -510,7 +511,7 @@ class JellyfinClient:
                 user_data.last_played_date if user_data else None,
             )
             for value in candidate_datetimes:
-                normalized = self._normalize_local_datetime(value)
+                normalized = normalize_local_datetime(value)
                 if normalized is not None and normalized >= min_last_modified:
                     filtered.append(item)
                     break
@@ -618,13 +619,3 @@ class JellyfinClient:
             or user_data.playback_position_ticks
             or user_data.is_favorite
         )
-
-    @staticmethod
-    def _normalize_local_datetime(value: datetime | None) -> datetime | None:
-        """Return a timezone-aware datetime."""
-        if value is None:
-            return value
-        local_tz = datetime.now().astimezone().tzinfo or UTC
-        if value.tzinfo is None:
-            return value.replace(tzinfo=local_tz)
-        return value.astimezone(local_tz)

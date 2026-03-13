@@ -1,11 +1,9 @@
 """Jellyfin library provider implementation."""
 
-import base64
 from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
-import requests
 from anibridge.library import (
     HistoryEntry,
     LibraryEntry,
@@ -20,6 +18,7 @@ from anibridge.library import (
     MediaKind,
 )
 from anibridge.library.base import MappingDescriptor
+from anibridge.utils.image import fetch_image_as_data_url
 from anibridge.utils.types import ProviderLogger
 
 from anibridge.providers.library.jellyfin.client import JellyfinClient
@@ -124,13 +123,11 @@ class JellyfinLibraryMedia(LibraryMedia["JellyfinLibraryProvider"]):
             url = self._provider._client.build_image_url(
                 str(self._item.id), tag=str(tag)
             )
-            response = requests.get(
-                url, headers=self._provider._client.auth_headers(), timeout=3
+            return fetch_image_as_data_url(
+                url,
+                headers=self._provider._client.auth_headers(),
+                timeout=3,
             )
-            response.raise_for_status()
-            content_type = response.headers.get("Content-Type", "image/jpeg")
-            encoded = base64.b64encode(response.content).decode("utf-8")
-            return f"data:{content_type};base64,{encoded}"
         except Exception:
             self._provider.log.exception("Failed to fetch Jellyfin poster")
             return None

@@ -21,7 +21,12 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-dependencies = ["anibridge-library-base>=0.2.0b4", "jellyfin-sdk>=0.3.0"]
+dependencies = [
+    "anibridge-library-base>=0.2.0b6",
+    "jellyfin-sdk>=0.3.0",
+    "pydantic>=2.12.5",
+    "requests>=2.32.0",
+]
 
 [tool.ruff]
 indent-width = 4
