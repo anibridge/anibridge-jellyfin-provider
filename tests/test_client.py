@@ -126,15 +126,29 @@ def test_load_show_metadata_fetchers_uses_enabled_when_order_missing() -> None:
 
 def test_is_on_continue_watching_checks_next_up_for_series() -> None:
     """Series should be considered on continue watching when present in Next Up."""
+    user_id = uuid4()
+    section_id = uuid4()
     series_id = uuid4()
 
     class _FakeTvShowsApi:
         def get_next_up(self, **kwargs):
-            assert kwargs["series_id"] == series_id
+            assert kwargs["user_id"] == user_id
+            assert kwargs["parent_id"] == section_id
             response = type(
                 "_Response",
                 (),
-                {"items": [cast(Any, _FakeItem(id="ep", type=BaseItemKind.EPISODE))]},
+                {
+                    "items": [
+                        cast(
+                            Any,
+                            _FakeItem(
+                                id="ep",
+                                type=BaseItemKind.EPISODE,
+                                series_id=series_id,
+                            ),
+                        )
+                    ]
+                },
             )
             return cast(
                 Any,
@@ -148,20 +162,31 @@ def test_is_on_continue_watching_checks_next_up_for_series() -> None:
         user="demo",
     )
     client._tv_shows_api = cast(Any, _FakeTvShowsApi())
-    client._user_id = series_id
+    client._user_id = user_id
+
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
 
     series = cast(Any, _FakeItem(id=series_id, type=BaseItemKind.SERIES))
-    assert client.is_on_continue_watching(series) is True
+    assert client.is_on_continue_watching(section, series) is True
 
 
 def test_is_on_continue_watching_checks_next_up_for_episode_series() -> None:
     """Episodes should resolve their parent series when checking Next Up."""
     user_id = uuid4()
+    section_id = uuid4()
     series_id = uuid4()
 
     class _FakeTvShowsApi:
         def get_next_up(self, **kwargs):
-            assert kwargs["series_id"] == series_id
+            assert kwargs["user_id"] == user_id
+            assert kwargs["parent_id"] == section_id
             return cast(Any, type("_Response", (), {"items": []})())
 
     client = JellyfinClient(
@@ -173,11 +198,20 @@ def test_is_on_continue_watching_checks_next_up_for_episode_series() -> None:
     client._tv_shows_api = cast(Any, _FakeTvShowsApi())
     client._user_id = user_id
 
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+
     episode = cast(
         Any,
         _FakeItem(id=uuid4(), type=BaseItemKind.EPISODE, series_id=series_id),
     )
-    assert client.is_on_continue_watching(episode) is False
+    assert client.is_on_continue_watching(section, episode) is False
 
 
 @pytest.mark.asyncio

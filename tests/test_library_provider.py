@@ -7,15 +7,16 @@ from typing import cast
 
 import pytest
 from anibridge.library import LibraryShow
+from anibridge.utils.types import ProviderLogger
 
 import anibridge.providers.library.jellyfin as library_module
 
 
-def _test_logger() -> logging.Logger:
+def _test_logger() -> ProviderLogger:
     logger = logging.getLogger("tests.anibridge.client")
     logger.handlers = []
     logger.addHandler(logging.NullHandler())
-    return logger
+    return cast(ProviderLogger, logger)
 
 
 class FakeJellyfinClient:
@@ -100,7 +101,7 @@ class FakeJellyfinClient:
             history = [_history_tuple(item)]
         return tuple(entry for entry in history if entry is not None)
 
-    def is_on_continue_watching(self, item: FakeItem) -> bool:
+    def is_on_continue_watching(self, _section: FakeItem, item: FakeItem) -> bool:
         user_data = item.user_data
         return bool(
             user_data and not user_data.played and user_data.playback_position_ticks
