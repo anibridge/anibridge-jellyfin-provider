@@ -309,6 +309,7 @@ class JellyfinClient:
                 self.log.exception(
                     "Failed to load continue watching items for section %s", section_id
                 )
+                raise
 
             cache_entry = _FrozenCacheEntry(
                 keys=frozenset(series_ids),
@@ -637,7 +638,7 @@ class JellyfinClient:
                 "Failed to load episodes while checking user activity for show %s",
                 item.id,
             )
-            return False
+            raise
 
         return any(self._has_user_activity(e.user_data) for e in episodes)
 
