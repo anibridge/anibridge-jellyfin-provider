@@ -200,12 +200,14 @@ class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
     @property
     def on_watching(self) -> bool:
         """Check if the media item is on the user's current watching list."""
-        return self._provider.is_on_continue_watching(self._item)
+        return self._provider._client.is_on_continue_watching(
+            self._section._section, self._item
+        )
 
     @property
     def on_watchlist(self) -> bool:
         """Check if the media item is on the user's watchlist."""
-        return self._provider.is_on_watchlist(self._item)
+        return self._provider._client.is_on_watchlist(self._item)
 
     @property
     def user_rating(self) -> int | None:
@@ -570,14 +572,6 @@ class JellyfinLibraryProvider(LibraryProvider):
     async def clear_cache(self) -> None:
         """Reset any cached Jellyfin responses maintained by the provider."""
         self._client.clear_cache()
-
-    def is_on_continue_watching(self, item: BaseItemDto) -> bool:
-        """Determine whether the given item appears in Continue Watching."""
-        return self._client.is_on_continue_watching(item)
-
-    def is_on_watchlist(self, item: BaseItemDto) -> bool:
-        """Determine whether the given item appears in the user's favorites list."""
-        return self._client.is_on_watchlist(item)
 
     async def get_history(self, item: BaseItemDto) -> Sequence[HistoryEntry]:
         """Return the watch history for the given Jellyfin item."""

@@ -3,7 +3,9 @@
 import asyncio
 import importlib.metadata
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
@@ -51,6 +53,14 @@ else:
 
 
 __all__ = ["JellyfinClient"]
+
+
+@dataclass(slots=True)
+class _FrozenCacheEntry:
+    """Immutable cache entry for storing Jellyfin series IDs with expiration."""
+
+    keys: frozenset
+    expires_at: float
 
 
 class JellyfinClient:
@@ -107,6 +117,7 @@ class JellyfinClient:
         self._base_url = url.rstrip("/")
         self._sections: list[BaseItemDto] = []
         self._show_metadata_fetcher_by_section_id: dict[str, str] = {}
+        self._continue_cache: dict[UUID, _FrozenCacheEntry] = {}
 
     async def initialize(self) -> None:
         """Authenticate and populate server metadata."""
@@ -133,6 +144,7 @@ class JellyfinClient:
         self._user_name = None
         self._sections.clear()
         self._show_metadata_fetcher_by_section_id.clear()
+        self._continue_cache.clear()
 
     def user_id(self) -> str:
         """Return the Jellyfin user id for the session."""
@@ -260,30 +272,51 @@ class JellyfinClient:
 
         return tuple(history)
 
-    def is_on_continue_watching(self, item: BaseItemDto) -> bool:
+    def is_on_continue_watching(self, section: BaseItemDto, item: BaseItemDto) -> bool:
         """Determine whether the item appears in Jellyfin's Next Up deck."""
-        if self._tv_shows_api is None or self._user_id is None:
-            raise RuntimeError("Jellyfin client has not been initialized")
+        if section.id is None or item.type == BaseItemKind.MOVIE:
+            return False
 
-        series_id: UUID | None = None
-        if item.type == BaseItemKind.SERIES:
-            series_id = item.id
-        elif item.type in {BaseItemKind.SEASON, BaseItemKind.EPISODE}:
-            series_id = item.series_id
-
+        series_id: UUID | None = item.series_id or item.id
         if series_id is None:
             return False
 
-        try:
-            response = self._tv_shows_api.get_next_up(
-                user_id=self._user_id,
-                series_id=series_id,
-                limit=1,
-                enable_user_data=False,
+        section_id = section.id
+        cache_entry = self._continue_cache.get(section_id)
+        now = monotonic()
+        if cache_entry is None or cache_entry.expires_at <= now:
+            # Load continue watching items for this section
+            if self._tv_shows_api is None or self._user_id is None:
+                raise RuntimeError("Jellyfin client has not been initialized")
+
+            series_ids: set[UUID] = set()
+            try:
+                next_up_response = self._tv_shows_api.get_next_up(
+                    user_id=self._user_id,
+                    limit=1000,
+                    enable_user_data=False,
+                    enable_resumable=True,
+                    disable_first_episode=True,
+                    parent_id=section_id,
+                )
+                items = (next_up_response.items or []) if next_up_response else []
+
+                for next_up_item in items:
+                    next_series_id = next_up_item.series_id or next_up_item.id
+                    if next_series_id is not None:
+                        series_ids.add(next_series_id)
+            except Exception:
+                self.log.exception(
+                    "Failed to load continue watching items for section %s", section_id
+                )
+
+            cache_entry = _FrozenCacheEntry(
+                keys=frozenset(series_ids),
+                expires_at=monotonic() + 300,
             )
-            return bool(response and response.items)
-        except TypeError, ValueError:
-            return False
+            self._continue_cache[section_id] = cache_entry
+
+        return series_id in cache_entry.keys
 
     def is_on_watchlist(self, item: BaseItemDto) -> bool:
         """Determine whether the item is on the user's favorites list."""
