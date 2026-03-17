@@ -61,7 +61,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [lint, tests]
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: publish
     permissions:
