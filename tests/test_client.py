@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -476,3 +477,348 @@ async def test_list_section_items_passes_supported_server_filters():
     assert captured_calls[0].get("is_played") is True
     assert captured_calls[0].get("genres") == ["action"]
     assert captured_calls[0].get("ids") == [key]
+
+
+@pytest.mark.asyncio
+async def test_initialize_and_close_manage_client_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """initialize/close should populate and then clear runtime state."""
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+
+    async def inline_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "anibridge.providers.library.jellyfin.client.asyncio.to_thread",
+        inline_to_thread,
+    )
+    monkeypatch.setattr(client, "_configure_client", lambda: None)
+    monkeypatch.setattr(
+        client,
+        "_resolve_user",
+        lambda: cast(Any, SimpleNamespace(id=uuid4(), name="Demo")),
+    )
+    monkeypatch.setattr(
+        client,
+        "_load_sections",
+        lambda: [cast(Any, _FakeItem(id=uuid4(), type=BaseItemKind.COLLECTIONFOLDER))],
+    )
+    monkeypatch.setattr(
+        client, "_load_show_metadata_fetchers", lambda: {"sec": "AniDb"}
+    )
+
+    await client.initialize()
+    assert client.user_name() == "Demo"
+    assert len(client.sections()) == 1
+    assert client.show_metadata_fetcher_for_section("sec") == "AniDb"
+
+    await client.close()
+    assert client.sections() == ()
+    with pytest.raises(RuntimeError):
+        client.user_id()
+
+
+def test_runtime_errors_before_initialize() -> None:
+    """Methods requiring initialized state should raise when not ready."""
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+
+    with pytest.raises(RuntimeError):
+        client.user_id()
+    with pytest.raises(RuntimeError):
+        client.user_name()
+    with pytest.raises(RuntimeError):
+        client.list_show_seasons(uuid4())
+    with pytest.raises(RuntimeError):
+        client.list_show_episodes(show_id=uuid4())
+    with pytest.raises(RuntimeError):
+        client.get_item(uuid4())
+
+
+def test_url_and_header_helpers() -> None:
+    """Header and URL helper methods should include expected parameters."""
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token123",
+        user="demo",
+    )
+
+    assert client.auth_headers() == {"X-Emby-Token": "token123"}
+    image_url = client.build_image_url("item-1", tag="abc")
+    assert "/Items/item-1/Images/Primary" in image_url
+    assert "api_key=token123" in image_url
+    assert "tag=abc" in image_url
+    assert client.build_item_url("item-1").endswith("id=item-1")
+    assert client.clear_cache() is None
+
+
+def test_resolve_user_matches_by_id_and_name() -> None:
+    """_resolve_user should match configured target by id or username."""
+    user_by_id = cast(Any, SimpleNamespace(id="abc", name="Person A"))
+    user_by_name = cast(Any, SimpleNamespace(id="def", name="Demo"))
+
+    class _FakeUserApi:
+        def __init__(self, users):
+            self._users = users
+
+        def get_users(self):
+            return self._users
+
+    client_by_id = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="ABC",
+    )
+    client_by_id._user_api = cast(Any, _FakeUserApi([user_by_id, user_by_name]))
+    assert client_by_id._resolve_user().id == "abc"
+
+    client_by_name = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client_by_name._user_api = cast(Any, _FakeUserApi([user_by_id, user_by_name]))
+    assert client_by_name._resolve_user().id == "def"
+
+    client_empty = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="   ",
+    )
+    client_empty._user_api = cast(Any, _FakeUserApi([user_by_id]))
+    with pytest.raises(ValueError):
+        client_empty._resolve_user()
+
+
+def test_load_sections_applies_filters() -> None:
+    """_load_sections should include only supported collection types and filters."""
+    movies = cast(
+        Any,
+        SimpleNamespace(
+            id=uuid4(),
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.MOVIES,
+            name="Movies",
+        ),
+    )
+    shows = cast(
+        Any,
+        SimpleNamespace(
+            id=uuid4(),
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+            name="Anime",
+        ),
+    )
+    music = cast(
+        Any,
+        SimpleNamespace(
+            id=uuid4(),
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.BOXSETS,
+            name="Box",
+        ),
+    )
+
+    class _FakeViewsApi:
+        def get_user_views(self, **kwargs):
+            return cast(Any, SimpleNamespace(items=[movies, shows, music]))
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+        section_filter=["anime"],
+    )
+    client._user_views_api = cast(Any, _FakeViewsApi())
+    client._user_id = cast(Any, uuid4())
+
+    sections = client._load_sections()
+    assert [s.name for s in sections] == ["Anime"]
+
+
+def test_parse_uuid_keys_and_user_activity_helpers() -> None:
+    """UUID key parsing and user activity helpers should handle edge values."""
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    first = uuid4()
+    parsed = client._parse_uuid_keys([str(first), "bad-uuid", str(uuid4())])
+    assert parsed is not None and parsed[0] == first
+    assert client._parse_uuid_keys(None) is None
+
+    assert client._has_user_activity(None) is False
+    assert client._has_user_activity(cast(Any, _FakeUserData())) is False
+    assert client._has_user_activity(cast(Any, _FakeUserData(play_count=1))) is True
+
+
+def test_item_has_user_activity_for_series_uses_episode_fallback() -> None:
+    """Series user activity checks should fall back to episode activity when needed."""
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    series = cast(
+        Any, _FakeItem(id=uuid4(), type=BaseItemKind.SERIES, user_data=_FakeUserData())
+    )
+
+    client.list_show_episodes = lambda **kwargs: [  # type: ignore
+        cast(
+            Any,
+            _FakeItem(
+                id=uuid4(),
+                type=BaseItemKind.EPISODE,
+                user_data=_FakeUserData(playback_position_ticks=1),
+            ),
+        )
+    ]
+    assert (
+        client._item_has_user_activity(
+            series, section_collection_type=CollectionType.TVSHOWS
+        )
+        is True
+    )
+
+
+def test_show_episode_and_item_lookup_success_paths() -> None:
+    """Season/episode/item helpers should proxy through initialized API clients."""
+    show_id = uuid4()
+    season_id = uuid4()
+    episode_id = uuid4()
+
+    season_item = cast(Any, _FakeItem(id=season_id, type=BaseItemKind.SEASON))
+    episode_item = cast(Any, _FakeItem(id=episode_id, type=BaseItemKind.EPISODE))
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            include_item_types = kwargs.get("include_item_types")
+            if include_item_types == [BaseItemKind.SEASON]:
+                return cast(Any, SimpleNamespace(items=[season_item]))
+            return cast(Any, SimpleNamespace(items=[episode_item]))
+
+    class _FakeUserLibraryApi:
+        def get_item(self, item_id, **kwargs):
+            return cast(Any, _FakeItem(id=item_id, type=BaseItemKind.MOVIE))
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_library_api = cast(Any, _FakeUserLibraryApi())
+    client._user_id = cast(Any, uuid4())
+
+    seasons = client.list_show_seasons(show_id)
+    episodes = client.list_show_episodes(show_id=show_id, season_id=season_id)
+    item = client.get_item(show_id)
+
+    assert len(seasons) == 1 and seasons[0].id == season_id
+    assert len(episodes) == 1 and episodes[0].id == episode_id
+    assert item.id == show_id
+
+
+@pytest.mark.asyncio
+async def test_fetch_history_and_continue_watching_paths() -> None:
+    """History and continue watching helpers should handle common branches."""
+    section_id = uuid4()
+    series_id = uuid4()
+    episode_id = uuid4()
+
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+    series = cast(Any, _FakeItem(id=series_id, type=BaseItemKind.SERIES))
+    movie = cast(
+        Any,
+        _FakeItem(
+            id=uuid4(),
+            type=BaseItemKind.MOVIE,
+            user_data=_FakeUserData(last_played_date=datetime.now(UTC)),
+        ),
+    )
+    episode = cast(
+        Any,
+        _FakeItem(
+            id=episode_id,
+            type=BaseItemKind.EPISODE,
+            user_data=_FakeUserData(last_played_date=datetime.now(UTC)),
+        ),
+    )
+
+    class _FakeTvShowsApi:
+        def __init__(self):
+            self.calls = 0
+
+        def get_next_up(self, **kwargs):
+            self.calls += 1
+            return cast(
+                Any,
+                SimpleNamespace(
+                    items=[
+                        cast(
+                            Any,
+                            _FakeItem(
+                                id=episode_id,
+                                type=BaseItemKind.EPISODE,
+                                series_id=series_id,
+                            ),
+                        )
+                    ]
+                ),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._user_id = cast(Any, uuid4())
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client.list_show_episodes = lambda **kwargs: [episode]  # type: ignore
+
+    history_series = await client.fetch_history(series)
+    history_movie = await client.fetch_history(movie)
+    assert history_series and history_series[0][0] == str(episode_id)
+    assert history_movie and history_movie[0][0] == str(movie.id)
+
+    assert client.is_on_continue_watching(section, series) is True
+    # Cached path should still be true.
+    assert client.is_on_continue_watching(section, series) is True
+
+    empty_section = cast(
+        Any,
+        _FakeItem(
+            id=None,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+    assert client.is_on_continue_watching(empty_section, movie) is False

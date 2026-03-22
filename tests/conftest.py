@@ -2,9 +2,11 @@
 
 from collections.abc import AsyncGenerator
 from logging import getLogger
+from typing import cast
 
 import pytest
 import pytest_asyncio
+from anibridge.utils.types import ProviderLogger
 
 from anibridge.providers.library.jellyfin import JellyfinLibraryProvider
 
@@ -18,7 +20,9 @@ def library_provider() -> JellyfinLibraryProvider:
             "token": "token",
             "user": "demo",
         },
-        logger=getLogger("anibridge.providers.library.jellyfin.test"),
+        logger=cast(
+            ProviderLogger, getLogger("anibridge.providers.library.jellyfin.test")
+        ),
     )
 
 
