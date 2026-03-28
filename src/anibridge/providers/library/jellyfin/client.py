@@ -143,7 +143,7 @@ class JellyfinClient:
         self._user_name = None
         self._sections.clear()
         self._show_metadata_fetcher_by_section_id.clear()
-        self._continue_cache.clear()
+        self.clear_cache()
 
     def user_id(self) -> str:
         """Return the Jellyfin user id for the session."""
@@ -365,7 +365,8 @@ class JellyfinClient:
         return f"{self._base_url}/web/#/details?{params}"
 
     def clear_cache(self) -> None:
-        """Clear cached metadata (no-op for Jellyfin)."""
+        """Clear cached metadata."""
+        self._continue_cache.clear()
         return None
 
     def _configure_client(self) -> None:

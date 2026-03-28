@@ -18,6 +18,7 @@ from anibridge.library import (
     MediaKind,
 )
 from anibridge.library.base import MappingDescriptor
+from anibridge.utils.cache import cache, ttl_cache
 from anibridge.utils.image import fetch_image_as_data_url
 from anibridge.utils.types import ProviderLogger
 
@@ -283,18 +284,33 @@ class JellyfinLibraryShow(JellyfinLibraryEntry, LibraryShow["JellyfinLibraryProv
         """Initialize the show wrapper."""
         super().__init__(provider, section, item, MediaKind.SHOW)
 
+    @ttl_cache(ttl=30)
     def episodes(self) -> Sequence[JellyfinLibraryEpisode]:
         """Return all episodes belonging to the show."""
         if self._item.id is None:
             return ()
+        seasons = self.seasons()
+        if seasons and all(
+            season.episodes.cache_info().currsize > 0 for season in seasons
+        ):
+            return tuple(episode for season in seasons for episode in season.episodes())
+
+        seasons_by_id = {season.key: season for season in seasons}
         episodes = self._provider._client.list_show_episodes(
             show_id=self._item.id,
         )
         return tuple(
-            JellyfinLibraryEpisode(self._provider, self._section, episode)
+            JellyfinLibraryEpisode(
+                self._provider,
+                self._section,
+                episode,
+                season=seasons_by_id.get(str(episode.season_id)),
+                show=self,
+            )
             for episode in episodes
         )
 
+    @ttl_cache(ttl=30)
     def seasons(self) -> Sequence[JellyfinLibrarySeason]:
         """Return all seasons belonging to the show."""
         if self._item.id is None:
@@ -326,6 +342,7 @@ class JellyfinLibrarySeason(
         self._show = show
         self.index = int(item.index_number or 0)
 
+    @ttl_cache(ttl=30)
     def episodes(self) -> Sequence[JellyfinLibraryEpisode]:
         """Return the episodes belonging to this season."""
         if self._item.series_id is None or self._item.id is None:
@@ -341,6 +358,7 @@ class JellyfinLibrarySeason(
             for episode in episodes
         )
 
+    @cache
     def show(self) -> LibraryShow:
         """Return the parent show."""
         if self._show is not None:
@@ -388,6 +406,7 @@ class JellyfinLibraryEpisode(
         self.index = int(item.index_number or 0)
         self.season_index = int(item.parent_index_number or 0)
 
+    @cache
     def season(self) -> LibrarySeason:
         """Return the parent season."""
         if self._season is not None:
@@ -404,6 +423,7 @@ class JellyfinLibraryEpisode(
         )
         return self._season
 
+    @cache
     def show(self) -> LibraryShow:
         """Return the parent show."""
         if self._show is not None:
