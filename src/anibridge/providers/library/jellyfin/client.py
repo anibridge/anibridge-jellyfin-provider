@@ -291,7 +291,6 @@ class JellyfinClient:
                 for timestamp in (
                     item.date_created,
                     item.date_last_media_added,
-                    getattr(item, "date_last_saved", None),
                     user_data.last_played_date if user_data else None,
                 )
                 if timestamp is not None
