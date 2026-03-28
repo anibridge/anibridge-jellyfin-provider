@@ -215,6 +215,154 @@ def test_is_on_continue_watching_checks_next_up_for_episode_series() -> None:
     assert client.is_on_continue_watching(section, episode) is False
 
 
+def test_is_on_continue_watching_reuses_cache_when_item_not_updated() -> None:
+    """Cache should be reused when item timestamps are not newer than cache."""
+    user_id = uuid4()
+    section_id = uuid4()
+    series_id = uuid4()
+    calls = {"count": 0}
+
+    class _FakeTvShowsApi:
+        def get_next_up(self, **kwargs):
+            calls["count"] += 1
+            assert kwargs["user_id"] == user_id
+            assert kwargs["parent_id"] == section_id
+            return cast(
+                Any,
+                type(
+                    "_Response",
+                    (),
+                    {
+                        "items": [
+                            cast(
+                                Any,
+                                _FakeItem(
+                                    id="ep",
+                                    type=BaseItemKind.EPISODE,
+                                    series_id=series_id,
+                                ),
+                            )
+                        ]
+                    },
+                )(),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client._user_id = user_id
+
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+    series = cast(
+        Any,
+        _FakeItem(
+            id=series_id,
+            type=BaseItemKind.SERIES,
+            date_created=datetime.now(UTC) - timedelta(minutes=1),
+        ),
+    )
+
+    assert client.is_on_continue_watching(section, series) is True
+    assert client.is_on_continue_watching(section, series) is True
+    assert calls["count"] == 1
+
+
+def test_is_on_continue_watching_refreshes_cache_when_item_is_newer() -> None:
+    """Cache should refresh when the checked item changed since cache creation."""
+    user_id = uuid4()
+    section_id = uuid4()
+    series_id = uuid4()
+    calls = {"count": 0}
+
+    class _FakeTvShowsApi:
+        def get_next_up(self, **kwargs):
+            calls["count"] += 1
+            assert kwargs["user_id"] == user_id
+            assert kwargs["parent_id"] == section_id
+
+            if calls["count"] == 1:
+                return cast(
+                    Any,
+                    type(
+                        "_Response",
+                        (),
+                        {
+                            "items": [
+                                cast(
+                                    Any,
+                                    _FakeItem(
+                                        id="ep1",
+                                        type=BaseItemKind.EPISODE,
+                                        series_id=uuid4(),
+                                    ),
+                                )
+                            ]
+                        },
+                    )(),
+                )
+
+            return cast(
+                Any,
+                type(
+                    "_Response",
+                    (),
+                    {
+                        "items": [
+                            cast(
+                                Any,
+                                _FakeItem(
+                                    id="ep2",
+                                    type=BaseItemKind.EPISODE,
+                                    series_id=series_id,
+                                ),
+                            )
+                        ]
+                    },
+                )(),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client._user_id = user_id
+
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+    series = cast(
+        Any,
+        _FakeItem(
+            id=series_id,
+            type=BaseItemKind.SERIES,
+            date_last_media_added=datetime.now(UTC) + timedelta(seconds=1),
+        ),
+    )
+
+    assert client.is_on_continue_watching(section, series) is False
+    assert client.is_on_continue_watching(section, series) is True
+    assert calls["count"] == 2
+
+
 @pytest.mark.asyncio
 async def test_list_section_items_require_watched_includes_series_with_activity():
     """TV watched filtering should prefetch watched episodes and hydrate root shows."""

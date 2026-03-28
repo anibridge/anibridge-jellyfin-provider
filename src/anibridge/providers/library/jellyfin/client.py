@@ -4,8 +4,7 @@ import asyncio
 import importlib.metadata
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from time import monotonic
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
@@ -57,10 +56,10 @@ __all__ = ["JellyfinClient"]
 
 @dataclass(slots=True)
 class _FrozenCacheEntry:
-    """Immutable cache entry for storing Jellyfin series IDs with expiration."""
+    """Immutable cache entry for storing Jellyfin series IDs and cache time."""
 
     keys: frozenset
-    expires_at: float
+    cached_at: datetime
 
 
 class JellyfinClient:
@@ -283,8 +282,30 @@ class JellyfinClient:
 
         section_id = section.id
         cache_entry = self._continue_cache.get(section_id)
-        now = monotonic()
-        if cache_entry is None or cache_entry.expires_at <= now:
+        # Refresh section cache when the inspected item changed after cache creation.
+        should_refresh = cache_entry is None
+        if cache_entry is not None:
+            user_data = item.user_data
+            timestamps = [
+                timestamp
+                for timestamp in (
+                    item.date_created,
+                    item.date_last_media_added,
+                    getattr(item, "date_last_saved", None),
+                    user_data.last_played_date if user_data else None,
+                )
+                if timestamp is not None
+            ]
+
+            if timestamps:
+                item_updated_at = normalize_local_datetime(max(timestamps))
+                if (
+                    item_updated_at is not None
+                    and item_updated_at > cache_entry.cached_at
+                ):
+                    should_refresh = True
+
+        if should_refresh:
             # Load continue watching items for this section
             if self._tv_shows_api is None or self._user_id is None:
                 raise RuntimeError("Jellyfin client has not been initialized")
@@ -313,10 +334,11 @@ class JellyfinClient:
 
             cache_entry = _FrozenCacheEntry(
                 keys=frozenset(series_ids),
-                expires_at=monotonic() + 300,
+                cached_at=datetime.now(tz=UTC),
             )
             self._continue_cache[section_id] = cache_entry
 
+        assert cache_entry is not None
         return series_id in cache_entry.keys
 
     def is_on_watchlist(self, item: BaseItemDto) -> bool:
