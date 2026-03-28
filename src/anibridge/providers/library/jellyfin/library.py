@@ -124,9 +124,7 @@ class JellyfinLibraryMedia(LibraryMedia["JellyfinLibraryProvider"]):
                 str(self._item.id), tag=str(tag)
             )
             return fetch_image_as_data_url(
-                url,
-                headers=self._provider._client.auth_headers(),
-                timeout=3,
+                url, headers=self._provider._client.auth_headers(), timeout=3
             )
         except Exception:
             self._provider.log.exception("Failed to fetch Jellyfin poster")
@@ -216,19 +214,17 @@ class JellyfinLibraryEntry(LibraryEntry["JellyfinLibraryProvider"]):
         rating = user_data.rating if user_data else None
         if rating is None:
             return None
-        try:
-            return round(float(rating) * 10)
-        except TypeError, ValueError:
-            return None
+        return round(float(rating) * 10)
 
     @property
     def view_count(self) -> int:
         """Return the number of times this media item has been viewed."""
         user_data = self._item.user_data
-        try:
-            return int((user_data.play_count if user_data else 0) or 0)
-        except TypeError, ValueError:
+        if user_data is None:
             return 0
+        if user_data.play_count is None:
+            return 0
+        return int(user_data.play_count)
 
     async def history(self) -> Sequence[HistoryEntry]:
         """Fetch the viewing history for this media item."""

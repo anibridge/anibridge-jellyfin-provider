@@ -326,7 +326,7 @@ class JellyfinClient:
                     if next_series_id is not None:
                         series_ids.add(next_series_id)
             except Exception:
-                self.log.exception(
+                self.log.error(
                     "Failed to load continue watching items for section %s", section_id
                 )
                 raise
@@ -351,8 +351,7 @@ class JellyfinClient:
         """Construct an image URL."""
         base_url = self._base_url
         params = {
-            "maxHeight": 400,
-            "maxWidth": 300,
+            "width": 92,
             "quality": 90,
             "api_key": self._token,
         }
@@ -655,7 +654,7 @@ class JellyfinClient:
         try:
             episodes = self.list_show_episodes(show_id=item.id)
         except Exception:
-            self.log.exception(
+            self.log.error(
                 "Failed to load episodes while checking user activity for show %s",
                 item.id,
             )
