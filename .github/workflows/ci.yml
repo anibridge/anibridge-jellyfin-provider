@@ -35,7 +35,7 @@ jobs:
         run: uv sync --group dev --locked
 
       - name: Run linters
-        run: uv run ruff check . && uv run ruff format --check .
+        run: uv run ruff check . && uv run ruff format --check . && uv run ty check
 
   tests:
     name: Tests
