@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from anibridge.library import (
     HistoryEntry,
@@ -284,33 +284,14 @@ class JellyfinLibraryShow(JellyfinLibraryEntry, LibraryShow["JellyfinLibraryProv
         """Initialize the show wrapper."""
         super().__init__(provider, section, item, MediaKind.SHOW)
 
-    @ttl_cache(ttl=30)
     def episodes(self) -> Sequence[JellyfinLibraryEpisode]:
         """Return all episodes belonging to the show."""
         if self._item.id is None:
             return ()
         seasons = self.seasons()
-        if seasons and all(
-            season.episodes.cache_info().currsize > 0 for season in seasons
-        ):
-            return tuple(episode for season in seasons for episode in season.episodes())
+        return tuple(episode for season in seasons for episode in season.episodes())
 
-        seasons_by_id = {season.key: season for season in seasons}
-        episodes = self._provider._client.list_show_episodes(
-            show_id=self._item.id,
-        )
-        return tuple(
-            JellyfinLibraryEpisode(
-                self._provider,
-                self._section,
-                episode,
-                season=seasons_by_id.get(str(episode.season_id)),
-                show=self,
-            )
-            for episode in episodes
-        )
-
-    @ttl_cache(ttl=30)
+    @ttl_cache(ttl=15)
     def seasons(self) -> Sequence[JellyfinLibrarySeason]:
         """Return all seasons belonging to the show."""
         if self._item.id is None:
@@ -342,7 +323,7 @@ class JellyfinLibrarySeason(
         self._show = show
         self.index = int(item.index_number or 0)
 
-    @ttl_cache(ttl=30)
+    @ttl_cache(ttl=15)
     def episodes(self) -> Sequence[JellyfinLibraryEpisode]:
         """Return the episodes belonging to this season."""
         if self._item.series_id is None or self._item.id is None:
@@ -359,7 +340,7 @@ class JellyfinLibrarySeason(
         )
 
     @cache
-    def show(self) -> LibraryShow:
+    def show(self) -> JellyfinLibraryShow:
         """Return the parent show."""
         if self._show is not None:
             return self._show
@@ -407,7 +388,7 @@ class JellyfinLibraryEpisode(
         self.season_index = int(item.parent_index_number or 0)
 
     @cache
-    def season(self) -> LibrarySeason:
+    def season(self) -> JellyfinLibrarySeason:
         """Return the parent season."""
         if self._season is not None:
             return self._season
@@ -419,12 +400,12 @@ class JellyfinLibraryEpisode(
             self._provider,
             self._section,
             raw_season,
-            show=cast(JellyfinLibraryShow, self.show()),
+            show=self.show(),
         )
         return self._season
 
     @cache
-    def show(self) -> LibraryShow:
+    def show(self) -> JellyfinLibraryShow:
         """Return the parent show."""
         if self._show is not None:
             return self._show
@@ -475,7 +456,7 @@ class JellyfinLibraryProvider(LibraryProvider):
                     continue
                 if provider := _STRICT_FETCHER_TO_PROVIDER.get(metadata_fetcher):
                     self._strict_show_provider_by_section[section.key] = provider
-        await self.clear_cache()
+
         self.log.debug(
             "Jellyfin provider initialized for user id=%s with %s sections",
             self._user.key,
@@ -588,6 +569,12 @@ class JellyfinLibraryProvider(LibraryProvider):
     async def clear_cache(self) -> None:
         """Reset any cached Jellyfin responses maintained by the provider."""
         self._client.clear_cache()
+        # Note this clears the class level caches, which will be a no-op since the
+        # caches used here are instance level. However, I'm leaving this in place
+        # in case anibridge-utils caches support instance level cache clearing from
+        # the class call in the future.
+        JellyfinLibraryShow.seasons.cache_clear()
+        JellyfinLibrarySeason.episodes.cache_clear()
 
     async def get_history(self, item: BaseItemDto) -> Sequence[HistoryEntry]:
         """Return the watch history for the given Jellyfin item."""
@@ -610,7 +597,7 @@ class JellyfinLibraryProvider(LibraryProvider):
 
     def _wrap_entry(
         self, section: JellyfinLibrarySection, item: BaseItemDto
-    ) -> LibraryEntry:
+    ) -> JellyfinLibraryEntry:
         """Wrap a Jellyfin item in the appropriate library entry class."""
         item_type = item.type
         if item_type == BaseItemKind.EPISODE:
