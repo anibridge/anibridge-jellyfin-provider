@@ -21,7 +21,7 @@
             }
         }
     },
-    "postCreateCommand": "uv sync --all-groups --all-packages",
+    "postCreateCommand": "uv sync --all-extras --all-groups --all-packages",
     "containerEnv": {
         "UV_LINK_MODE": "copy"
     }
