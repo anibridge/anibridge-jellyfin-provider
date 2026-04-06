@@ -5,51 +5,31 @@ import importlib.metadata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
 
 from anibridge.utils.datetime import normalize_local_datetime
 from anibridge.utils.types import ProviderLogger
 
-# The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
-if TYPE_CHECKING:
-    from jellyfin.generated.api_10_11 import (
-        ApiClient,
-        BaseItemDto,
-        BaseItemKind,
-        CollectionType,
-        CollectionTypeOptions,
-        Configuration,
-        ItemFields,
-        ItemsApi,
-        LibraryStructureApi,
-        TvShowsApi,
-        UserApi,
-        UserDto,
-        UserItemDataDto,
-        UserLibraryApi,
-        UserViewsApi,
-    )
-else:
-    from jellyfin.generated import (
-        ApiClient,
-        BaseItemDto,
-        BaseItemKind,
-        CollectionType,
-        CollectionTypeOptions,
-        Configuration,
-        ItemFields,
-        ItemsApi,
-        LibraryStructureApi,
-        TvShowsApi,
-        UserApi,
-        UserDto,
-        UserItemDataDto,
-        UserLibraryApi,
-        UserViewsApi,
-    )
-
+from jellyfin.generated.api_10_11.api import (
+    ItemsApi,
+    LibraryStructureApi,
+    TvShowsApi,
+    UserApi,
+    UserLibraryApi,
+    UserViewsApi,
+)
+from jellyfin.generated.api_10_11.api_client import ApiClient, Configuration
+from jellyfin.generated.api_10_11.models import (
+    BaseItemDto,
+    BaseItemKind,
+    CollectionType,
+    CollectionTypeOptions,
+    ItemFields,
+    UserDto,
+    UserItemDataDto,
+)
 
 __all__ = ["JellyfinClient"]
 
