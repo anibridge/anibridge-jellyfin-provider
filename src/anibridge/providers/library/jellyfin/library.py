@@ -45,14 +45,18 @@ _PROVIDER_ID_MAP = {
         "anilist": "anilist",
         "imdb": "imdb_movie",
         "tmdb": "tmdb_movie",
+        "themoviedb": "tmdb_movie",
         "tvdb": "tvdb_movie",
+        "thetvdb": "tvdb_movie",
     },
     "show": {
         "anidb": "anidb",
         "anilist": "anilist",
         "imdb": "imdb_show",
         "tmdb": "tmdb_show",
+        "themoviedb": "tmdb_show",
         "tvdb": "tvdb_show",
+        "thetvdb": "tvdb_show",
     },
 }
 
@@ -62,6 +66,7 @@ _STRICT_FETCHER_TO_PROVIDER = {
     "TheTVDB": "tvdb_show",
     "TheMovieDb": "tmdb_show",
     "IMDb": "imdb_show",
+    "Shoko": "anidb",
 }
 
 
