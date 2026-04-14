@@ -4,7 +4,7 @@ import asyncio
 import importlib.metadata
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
@@ -54,6 +54,8 @@ class JellyfinClient:
         ItemFields.PARENTID,
     )
     PARENT_ID_FIELD: ClassVar[list[ItemFields]] = [ItemFields.PARENTID]
+
+    _CONTINUE_CACHE_TTL: ClassVar[timedelta] = timedelta(seconds=55)
 
     def __init__(
         self,
@@ -256,33 +258,31 @@ class JellyfinClient:
         if section.id is None or item.type == BaseItemKind.MOVIE:
             return False
 
+        now = datetime.now(tz=UTC)
         series_id: UUID | None = item.series_id or item.id
         if series_id is None:
             return False
 
         section_id = section.id
         cache_entry = self._continue_cache.get(section_id)
-        # Refresh section cache when the inspected item changed after cache creation.
-        should_refresh = cache_entry is None
-        if cache_entry is not None:
-            user_data = item.user_data
-            timestamps = [
-                timestamp
+        user_data = item.user_data
+        # Refresh when no cache exists, TTL expired, or an item timestamp is newer
+        # than the cache. The TTL acts as a safety net because Jellyfin doesn't
+        # always propagate episode activity to show-level timestamps.
+        should_refresh = (
+            cache_entry is None
+            or (cache_entry.cached_at + self._CONTINUE_CACHE_TTL <= now)
+            or any(
+                timestamp is not None and timestamp > cache_entry.cached_at
                 for timestamp in (
-                    item.date_created,
-                    item.date_last_media_added,
-                    user_data.last_played_date if user_data else None,
+                    normalize_local_datetime(item.date_last_media_added),
+                    normalize_local_datetime(item.date_created),
+                    normalize_local_datetime(
+                        user_data.last_played_date if user_data else None
+                    ),
                 )
-                if timestamp is not None
-            ]
-
-            if timestamps:
-                item_updated_at = normalize_local_datetime(max(timestamps))
-                if (
-                    item_updated_at is not None
-                    and item_updated_at > cache_entry.cached_at
-                ):
-                    should_refresh = True
+            )
+        )
 
         if should_refresh:
             # Load continue watching items for this section
@@ -313,7 +313,7 @@ class JellyfinClient:
 
             cache_entry = _FrozenCacheEntry(
                 keys=frozenset(series_ids),
-                cached_at=datetime.now(tz=UTC),
+                cached_at=now,
             )
             self._continue_cache[section_id] = cache_entry
 

@@ -10,7 +10,10 @@ from uuid import UUID, uuid4
 import pytest
 from jellyfin.generated import BaseItemKind, CollectionType, CollectionTypeOptions
 
-from anibridge.providers.library.jellyfin.client import JellyfinClient
+from anibridge.providers.library.jellyfin.client import (
+    JellyfinClient,
+    _FrozenCacheEntry,
+)
 
 
 @dataclass(slots=True)
@@ -361,6 +364,69 @@ def test_is_on_continue_watching_refreshes_cache_when_item_is_newer() -> None:
     assert client.is_on_continue_watching(section, series) is False
     assert client.is_on_continue_watching(section, series) is True
     assert calls["count"] == 2
+
+
+def test_is_on_continue_watching_refreshes_cache_when_ttl_expires() -> None:
+    """Cache should refresh once the continue-watching TTL has expired."""
+    user_id = uuid4()
+    section_id = uuid4()
+    series_id = uuid4()
+    calls = {"count": 0}
+
+    class _FakeTvShowsApi:
+        def get_next_up(self, **kwargs):
+            calls["count"] += 1
+            assert kwargs["user_id"] == user_id
+            assert kwargs["parent_id"] == section_id
+
+            return cast(
+                Any,
+                type(
+                    "_Response",
+                    (),
+                    {
+                        "items": [
+                            cast(
+                                Any,
+                                _FakeItem(
+                                    id=f"ep-{calls['count']}",
+                                    type=BaseItemKind.EPISODE,
+                                    series_id=series_id,
+                                ),
+                            )
+                        ]
+                    },
+                )(),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client._user_id = user_id
+
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+    series = cast(Any, _FakeItem(id=series_id, type=BaseItemKind.SERIES))
+
+    client._continue_cache[section_id] = _FrozenCacheEntry(
+        keys=frozenset({uuid4()}),
+        cached_at=datetime.now(UTC)
+        - JellyfinClient._CONTINUE_CACHE_TTL
+        - timedelta(seconds=1),
+    )
+
+    assert client.is_on_continue_watching(section, series) is True
+    assert calls["count"] == 1
 
 
 @pytest.mark.asyncio
