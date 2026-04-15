@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import Literal
 
 from anibridge.library import (
     HistoryEntry,
@@ -21,6 +21,7 @@ from anibridge.library.base import MappingDescriptor
 from anibridge.utils.cache import cache, ttl_cache
 from anibridge.utils.image import fetch_image_as_data_url
 from anibridge.utils.types import ProviderLogger
+from starlette.requests import Request
 
 from anibridge.providers.library.jellyfin.client import JellyfinClient
 from anibridge.providers.library.jellyfin.config import JellyfinProviderConfig
@@ -28,18 +29,10 @@ from anibridge.providers.library.jellyfin.webhook import (
     JellyfinWebhook,
     JellyfinWebhookNotificationType,
 )
-from jellyfin.generated.api_10_10 import BaseItemKind
+from jellyfin.generated.api_10_11.models import BaseItemDto, BaseItemKind
 
-# The jellyfin-sdk package uses dynamic imports that cannot be type-checked statically
-if TYPE_CHECKING:
-    from jellyfin.generated.api_10_11 import BaseItemDto
-else:
-    from jellyfin.generated import BaseItemDto
-
-if TYPE_CHECKING:
-    from starlette.requests import Request
-
-_PROVIDER_ID_MAP = {
+# Maps a Jellyfin provider external ID key to an AniBridge provider key
+_PROVIDER_ID_MAP: dict[Literal["movie", "show"], dict[str, str]] = {
     "movie": {
         "anidb": "anidb",
         "anilist": "anilist",
@@ -60,7 +53,8 @@ _PROVIDER_ID_MAP = {
     },
 }
 
-_STRICT_FETCHER_TO_PROVIDER = {
+# Maps a Jellyfin provider key to an AniBridge provider key (only for shows)
+_STRICT_FETCHER_TO_SHOW_PROVIDER: dict[str, str] = {
     "AniDB": "anidb",
     "AniList": "anilist",
     "TheTVDB": "tvdb_show",
@@ -459,7 +453,7 @@ class JellyfinLibraryProvider(LibraryProvider):
                 )
                 if not metadata_fetcher:
                     continue
-                if provider := _STRICT_FETCHER_TO_PROVIDER.get(metadata_fetcher):
+                if provider := _STRICT_FETCHER_TO_SHOW_PROVIDER.get(metadata_fetcher):
                     self._strict_show_provider_by_section[section.key] = provider
 
         self.log.debug(
