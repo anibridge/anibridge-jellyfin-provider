@@ -36,6 +36,7 @@ _PROVIDER_ID_MAP: dict[Literal["movie", "show"], dict[str, str]] = {
     "movie": {
         "anidb": "anidb",
         "anilist": "anilist",
+        "myanimelist": "mal",
         "imdb": "imdb_movie",
         "tmdb": "tmdb_movie",
         "themoviedb": "tmdb_movie",
@@ -45,6 +46,7 @@ _PROVIDER_ID_MAP: dict[Literal["movie", "show"], dict[str, str]] = {
     "show": {
         "anidb": "anidb",
         "anilist": "anilist",
+        "myanimelist": "mal",
         "imdb": "imdb_show",
         "tmdb": "tmdb_show",
         "themoviedb": "tmdb_show",
@@ -57,6 +59,7 @@ _PROVIDER_ID_MAP: dict[Literal["movie", "show"], dict[str, str]] = {
 _STRICT_FETCHER_TO_SHOW_PROVIDER: dict[str, str] = {
     "AniDB": "anidb",
     "AniList": "anilist",
+    "MyAnimeList": "mal",
     "TheTVDB": "tvdb_show",
     "TheMovieDb": "tmdb_show",
     "IMDb": "imdb_show",
