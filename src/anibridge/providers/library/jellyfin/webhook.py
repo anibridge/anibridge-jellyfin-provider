@@ -1,13 +1,9 @@
 """Jellyfin webhook payload parsing helpers."""
 
-import json
-from collections.abc import Mapping
 from enum import StrEnum
-from functools import cached_property
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from starlette.requests import Request
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.requests import Request
 
 
 class JellyfinWebhookNotificationType(StrEnum):
@@ -18,99 +14,121 @@ class JellyfinWebhookNotificationType(StrEnum):
     USER_DATA_SAVED = "UserDataSaved"
 
 
-class JellyfinWebhook:
-    """Represents a Jellyfin webhook event payload."""
+class JellyfinWebhookPayload(BaseModel):
+    """Jellyfin webhook payload."""
 
-    def __init__(self, data: Mapping[str, object]) -> None:
-        """Initialize the webhook wrapper.
+    model_config = ConfigDict(extra="ignore")
 
-        Args:
-            data (Mapping[str, object]): Raw payload mapping.
-        """
-        self._data = {str(key).lower(): value for key, value in data.items()}
+    notification_type: str = Field(..., alias="NotificationType")
+    user_id: str | None = Field(None, alias="UserId")
+    notification_username: str | None = Field(None, alias="NotificationUsername")
+    username: str | None = Field(None, alias="Username")
+    item_type: str | None = Field(None, alias="ItemType")
+    item_id: str | None = Field(None, alias="ItemId")
+    series_id: str | None = Field(None, alias="SeriesId")
 
-    @cached_property
-    def notification_type(self) -> str | None:
-        """Return the webhook notification type, if present."""
-        value = self._string_value("notificationtype")
-        return value if value else None
 
-    @cached_property
+class JellyfinWebhook(BaseModel):
+    """Represents a normalized Jellyfin webhook payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    payload: JellyfinWebhookPayload
+
+    @property
+    def notification_type(self) -> str:
+        """Raw notification type string from Jellyfin."""
+        return self.payload.notification_type
+
+    @property
     def user_id(self) -> str | None:
-        """Return the webhook user id, if present."""
-        value = self._string_value("userid")
-        return value if value else None
+        """The webhook user's Jellyfin account ID, if present."""
+        return self.payload.user_id
 
-    @cached_property
+    @property
     def username(self) -> str | None:
-        """Return the webhook username, if present."""
-        return self._string_value("notificationusername") or self._string_value(
-            "username"
-        )
+        """The webhook username, if present."""
+        return self.payload.notification_username or self.payload.username
 
-    @cached_property
-    def item_type(self) -> str | None:
-        """Return the Jellyfin item type, if present."""
-        return self._string_value("itemtype")
-
-    @cached_property
-    def item_id(self) -> str | None:
-        """Return the webhook item id, if present."""
-        value = self._string_value("itemid")
-        return value if value else None
-
-    @cached_property
-    def series_id(self) -> str | None:
-        """Return the webhook series id, if present."""
-        value = self._string_value("seriesid")
-        return value if value else None
-
-    @cached_property
+    @property
     def top_level_item_id(self) -> str | None:
-        """Return the top-level item id suitable for library sync keys."""
-        item_type = (self.item_type or "").lower()
-        if item_type in {"episode", "season"} and self.series_id:
-            return self.series_id
-        return self.item_id or self.series_id
+        """The top-level media item ID for the payload."""
+        item_type = (self.payload.item_type or "").strip().lower()
+        if item_type in {"episode", "season"} and self.payload.series_id:
+            return self.payload.series_id
+        return self.payload.item_id or self.payload.series_id
 
     @classmethod
     async def from_request(cls, request: Request) -> JellyfinWebhook:
-        """Create a webhook payload from an incoming HTTP request."""
-        content_type = request.headers.get("content-type", "").lower()
+        """Create a Jellyfin webhook instance from an incoming HTTP request."""
+        return await WebhookParser.from_request(request)
 
-        if content_type.startswith(
-            ("multipart/form-data", "application/x-www-form-urlencoded")
-        ):
+
+class WebhookParser:
+    """Parser for incoming Jellyfin webhooks."""
+
+    @staticmethod
+    def media_type(content_type: str | None) -> str:
+        """Read the media type portion of a Content-Type header."""
+        if not content_type:
+            return ""
+        return content_type.split(";", 1)[0].strip().lower()
+
+    @classmethod
+    async def from_request(cls, request: Request) -> JellyfinWebhook:
+        """Create a Jellyfin webhook instance from an incoming HTTP request."""
+        content_type = cls.media_type(request.headers.get("content-type"))
+
+        if content_type in ("multipart/form-data", "application/x-www-form-urlencoded"):
             form = await request.form()
             payload_raw = form.get("payload")
+
             if payload_raw:
+                if isinstance(payload_raw, bytes):
+                    payload_raw = payload_raw.decode("utf-8", "replace")
+
                 try:
-                    data = json.loads(str(payload_raw))
-                except json.JSONDecodeError as exc:
+                    payload = JellyfinWebhookPayload.model_validate_json(
+                        str(payload_raw)
+                    )
+                except Exception as exc:
                     raise ValueError(f"Invalid payload JSON: {exc}") from exc
             else:
-                data = {str(key): value for key, value in form.items()}
-        else:
+                try:
+                    payload = JellyfinWebhookPayload.model_validate(dict(form))
+                except Exception as exc:
+                    raise ValueError(
+                        f"Invalid Jellyfin webhook payload: {exc}"
+                    ) from exc
+
+            return JellyfinWebhook(payload=payload)
+
+        if content_type in ("application/json", "text/plain", ""):
             try:
                 data = await request.json()
             except Exception as exc:
                 raise ValueError(f"Invalid JSON body: {exc}") from exc
 
-        if isinstance(data, str):
+            if isinstance(data, str):
+                try:
+                    payload = JellyfinWebhookPayload.model_validate_json(data)
+                except Exception as exc:
+                    raise ValueError(
+                        f"Invalid Jellyfin webhook payload: {exc}"
+                    ) from exc
+                return JellyfinWebhook(payload=payload)
+
+            if not isinstance(data, dict):
+                raise ValueError("Invalid payload structure: expected JSON object")
+
             try:
-                data = json.loads(data)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON payload: {exc}") from exc
+                payload = JellyfinWebhookPayload.model_validate(data)
+            except Exception as exc:
+                raise ValueError(f"Invalid Jellyfin webhook payload: {exc}") from exc
 
-        if not isinstance(data, Mapping):
-            raise ValueError("Invalid payload structure: expected a JSON object")
+            return JellyfinWebhook(payload=payload)
 
-        return cls(data)
-
-    def _string_value(self, key: str) -> str | None:
-        """Return a string value for a key if present and non-empty."""
-        value = self._data.get(key)
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text if text else None
+        raise ValueError(
+            f"Unsupported content type '{content_type}' for Jellyfin webhook "
+            "(expected multipart/form-data or application/json)"
+        )

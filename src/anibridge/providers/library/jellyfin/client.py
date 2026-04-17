@@ -476,6 +476,31 @@ class JellyfinClient:
             )
             return self._filter_items_by_last_modified(items, min_last_modified)
 
+        if ids_filter is not None:
+            confirmed = [
+                series_id
+                for series_id in ids_filter
+                if self._filter_items_by_last_modified(
+                    _get_items(
+                        include_item_types=[BaseItemKind.EPISODE],
+                        fields=item_fields,
+                        parent_id=series_id,
+                        is_played=True,
+                        enable_user_data=True,
+                    ),
+                    min_last_modified,
+                )
+            ]
+            if not confirmed:
+                return []
+            return _get_items(
+                include_item_types=include_types,
+                fields=item_fields,
+                ids=confirmed,
+                enable_user_data=True,
+                enable_images=True,
+            )
+
         watched_items = _get_items(
             include_item_types=[BaseItemKind.EPISODE],
             fields=item_fields,
