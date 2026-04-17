@@ -577,6 +577,107 @@ async def test_list_section_items_require_watched_uses_episode_activity_for_cuto
 
 
 @pytest.mark.asyncio
+async def test_list_section_items_require_watched_with_series_keys_uses_parent_query():
+    """TV keyed watched lookups should treat keys as series ids, not episode ids."""
+    series_id = uuid4()
+    section = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.COLLECTIONFOLDER,
+        collection_type=CollectionType.TVSHOWS,
+    )
+    watched_episode = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.EPISODE,
+        series_id=series_id,
+        user_data=_FakeUserData(played=True, play_count=1),
+        date_created=datetime.now(UTC),
+    )
+    show = _FakeItem(
+        id=series_id,
+        type=BaseItemKind.SERIES,
+        date_created=datetime.now(UTC),
+    )
+
+    captured_calls: list[dict[str, object]] = []
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            captured_calls.append(kwargs)
+            include_types = kwargs.get("include_item_types")
+            if include_types == [BaseItemKind.EPISODE]:
+                return cast(Any, type("_Response", (), {"items": [watched_episode]})())
+            return cast(Any, type("_Response", (), {"items": [show]})())
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_id = uuid4()
+
+    items = await client.list_section_items(
+        cast(Any, section),
+        require_watched=True,
+        keys=(str(series_id),),
+    )
+
+    assert [item.id for item in items] == [series_id]
+    assert captured_calls[0].get("parent_id") == series_id
+    assert captured_calls[0].get("ids") is None
+    assert captured_calls[0].get("include_item_types") == [BaseItemKind.EPISODE]
+    assert captured_calls[1].get("ids") == [series_id]
+
+
+@pytest.mark.asyncio
+async def test_list_section_items_matches_raw_webhook_series_keys():
+    """Post-fetch key filtering should accept Jellyfin webhook ids without hyphens."""
+    series_id = uuid4()
+    section = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.COLLECTIONFOLDER,
+        collection_type=CollectionType.TVSHOWS,
+    )
+    watched_episode = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.EPISODE,
+        series_id=series_id,
+        user_data=_FakeUserData(played=True, play_count=1),
+        date_created=datetime.now(UTC),
+    )
+    show = _FakeItem(
+        id=series_id,
+        type=BaseItemKind.SERIES,
+        date_created=datetime.now(UTC),
+    )
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            include_types = kwargs.get("include_item_types")
+            if include_types == [BaseItemKind.EPISODE]:
+                return cast(Any, type("_Response", (), {"items": [watched_episode]})())
+            return cast(Any, type("_Response", (), {"items": [show]})())
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_id = uuid4()
+
+    items = await client.list_section_items(
+        cast(Any, section),
+        require_watched=True,
+        keys=(series_id.hex,),
+    )
+
+    assert [item.id for item in items] == [series_id]
+
+
+@pytest.mark.asyncio
 async def test_list_section_items_min_last_modified_filters_client_side():
     """Incremental filtering should use item/user timestamps on the client side."""
     now = datetime.now(UTC)

@@ -170,11 +170,12 @@ class JellyfinClient:
         filtered = list(items)
 
         if keys is not None:
-            normalized_keys = {str(key) for key in keys}
+            normalized_keys = {self._normalize_item_key(key) for key in keys}
             filtered = [
                 item
                 for item in filtered
-                if item.id is not None and str(item.id) in normalized_keys
+                if item.id is not None
+                and self._normalize_item_key(item.id) in normalized_keys
             ]
 
         return tuple(filtered)
@@ -577,6 +578,13 @@ class JellyfinClient:
                     break
 
         return filtered
+
+    def _normalize_item_key(self, key: object) -> str:
+        normalized = str(key).strip().lower()
+        try:
+            return UUID(normalized).hex
+        except TypeError, ValueError:
+            return normalized
 
     def _parse_uuid_keys(self, keys: Sequence[str] | None) -> list[UUID] | None:
         if not keys:
