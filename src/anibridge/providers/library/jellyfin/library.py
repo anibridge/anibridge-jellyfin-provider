@@ -293,7 +293,7 @@ class JellyfinLibraryShow(JellyfinLibraryEntry, LibraryShow["JellyfinLibraryProv
         seasons = self.seasons()
         return tuple(episode for season in seasons for episode in season.episodes())
 
-    @ttl_cache(ttl=15)
+    @ttl_cache(ttl=15, maxsize=1)
     def seasons(self) -> Sequence[JellyfinLibrarySeason]:
         """Return all seasons belonging to the show."""
         if self._item.id is None:
@@ -325,7 +325,7 @@ class JellyfinLibrarySeason(
         self._show = show
         self.index = int(item.index_number or 0)
 
-    @ttl_cache(ttl=15)
+    @ttl_cache(ttl=15, maxsize=1)
     def episodes(self) -> Sequence[JellyfinLibraryEpisode]:
         """Return the episodes belonging to this season."""
         if self._item.series_id is None or self._item.id is None:
