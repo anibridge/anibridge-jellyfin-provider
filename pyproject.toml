@@ -1,6 +1,6 @@
 [project]
 name = "anibridge-jellyfin-provider"
-version = "0.2.1"
+version = "0.2.2"
 description = "Jellyfin provider for the AniBridge project."
 license = "MIT"
 license-files = ["LICENSE"]
