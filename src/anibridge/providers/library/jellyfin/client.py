@@ -97,7 +97,7 @@ class JellyfinClient:
         self._user_name: str | None = None
         self._base_url = url.rstrip("/")
         self._sections: list[BaseItemDto] = []
-        self._show_metadata_fetcher_by_section_id: dict[str, str] = {}
+        self._show_metadata_fetcher_order_by_section_id: dict[str, tuple[str, ...]] = {}
         self._continue_cache: dict[UUID, _FrozenCacheEntry] = {}
 
     async def initialize(self) -> None:
@@ -108,8 +108,8 @@ class JellyfinClient:
         self._user_id = user.id
         self._user_name = user.name or str(user.id)
         self._sections = await asyncio.to_thread(self._load_sections)
-        self._show_metadata_fetcher_by_section_id = await asyncio.to_thread(
-            self._load_show_metadata_fetchers
+        self._show_metadata_fetcher_order_by_section_id = await asyncio.to_thread(
+            self._load_show_metadata_fetcher_orders
         )
 
     async def close(self) -> None:
@@ -124,7 +124,7 @@ class JellyfinClient:
         self._user_id = None
         self._user_name = None
         self._sections.clear()
-        self._show_metadata_fetcher_by_section_id.clear()
+        self._show_metadata_fetcher_order_by_section_id.clear()
         self.clear_cache()
 
     def user_id(self) -> str:
@@ -149,7 +149,12 @@ class JellyfinClient:
 
     def show_metadata_fetcher_for_section(self, section_id: str) -> str | None:
         """Return the top-priority TV metadata fetcher for a section if known."""
-        return self._show_metadata_fetcher_by_section_id.get(section_id)
+        fetchers = self._show_metadata_fetcher_order_by_section_id.get(section_id, ())
+        return fetchers[0] if fetchers else None
+
+    def show_metadata_fetchers_for_section(self, section_id: str) -> Sequence[str]:
+        """Return enabled TV metadata fetchers for a section in priority order."""
+        return self._show_metadata_fetcher_order_by_section_id.get(section_id, ())
 
     async def list_section_items(
         self,
@@ -603,10 +608,19 @@ class JellyfinClient:
 
     def _load_show_metadata_fetchers(self) -> dict[str, str]:
         """Get the top-priority TV metadata fetcher for each section if known."""
+        fetcher_orders = self._load_show_metadata_fetcher_orders()
+        return {
+            section_id: fetchers[0]
+            for section_id, fetchers in fetcher_orders.items()
+            if fetchers
+        }
+
+    def _load_show_metadata_fetcher_orders(self) -> dict[str, tuple[str, ...]]:
+        """Get enabled TV metadata fetchers for each section in priority order."""
         if self._library_structure_api is None:
             raise RuntimeError("Jellyfin client has not been initialized")
 
-        section_metadata_fetchers: dict[str, str] = {}
+        section_metadata_fetchers: dict[str, tuple[str, ...]] = {}
         virtual_folders = self._library_structure_api.get_virtual_folders() or []
         for folder in virtual_folders:
             # For whatever reason, the API returns this as a string instead of a UUID
@@ -620,34 +634,38 @@ class JellyfinClient:
             if not type_options:
                 continue
 
-            metadata_fetcher: str | None = None
+            metadata_fetchers: tuple[str, ...] = ()
             for option in type_options:
                 if option.type != BaseItemKind.SERIES:
                     continue
 
                 ordered_fetchers = option.metadata_fetcher_order or []
-                enabled_fetchers = option.metadata_fetchers
+                enabled_fetchers = option.metadata_fetchers or []
                 enabled_set = set(enabled_fetchers) if enabled_fetchers else None
+                prioritized_fetchers: list[str] = []
+                seen_fetchers: set[str] = set()
 
                 if ordered_fetchers:
                     for fetcher in ordered_fetchers:
-                        if not fetcher:
+                        if not fetcher or fetcher in seen_fetchers:
                             continue
                         if enabled_set is not None and fetcher not in enabled_set:
                             continue
-                        metadata_fetcher = fetcher
-                        break
-                else:
-                    for fetcher in enabled_fetchers or []:
-                        if fetcher:
-                            metadata_fetcher = fetcher
-                            break
+                        prioritized_fetchers.append(fetcher)
+                        seen_fetchers.add(fetcher)
 
-                if metadata_fetcher:
+                for fetcher in enabled_fetchers:
+                    if not fetcher or fetcher in seen_fetchers:
+                        continue
+                    prioritized_fetchers.append(fetcher)
+                    seen_fetchers.add(fetcher)
+
+                if prioritized_fetchers:
+                    metadata_fetchers = tuple(prioritized_fetchers)
                     break
 
-            if metadata_fetcher:
-                section_metadata_fetchers[section_id] = metadata_fetcher
+            if metadata_fetchers:
+                section_metadata_fetchers[section_id] = metadata_fetchers
 
         return section_metadata_fetchers
 

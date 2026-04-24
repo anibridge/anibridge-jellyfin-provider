@@ -27,12 +27,14 @@ class FakeJellyfinClient:
         *,
         sections: list[FakeItem],
         items: dict[str, list[FakeItem]],
-        show_metadata_fetchers_by_section: dict[str, str] | None = None,
+        show_metadata_fetcher_orders_by_section: dict[str, tuple[str, ...]]
+        | None = None,
     ):
         self._sections = sections
         self._items = items
-        self._show_metadata_fetchers_by_section = (
-            show_metadata_fetchers_by_section or {}
+        self._show_metadata_fetcher_orders_by_section = (
+            show_metadata_fetcher_orders_by_section
+            or {section.id: () for section in sections}
         )
         self._user_id = "user-1"
         self._user_name = "Demo User"
@@ -123,7 +125,11 @@ class FakeJellyfinClient:
         return None
 
     def show_metadata_fetcher_for_section(self, section_id: str) -> str | None:
-        return self._show_metadata_fetchers_by_section.get(section_id)
+        fetchers = self._show_metadata_fetcher_orders_by_section.get(section_id, ())
+        return fetchers[0] if fetchers else None
+
+    def show_metadata_fetchers_for_section(self, section_id: str) -> tuple[str, ...]:
+        return self._show_metadata_fetcher_orders_by_section.get(section_id, ())
 
 
 class FakeRequest:
@@ -274,7 +280,9 @@ def library_setup(monkeypatch: pytest.MonkeyPatch):
     fake_client = FakeJellyfinClient(
         sections=sections,
         items=items,
-        show_metadata_fetchers_by_section={"sec-shows": "AniDB"},
+        show_metadata_fetcher_orders_by_section={
+            "sec-shows": ("AniDB", "AniList", "TheTVDB")
+        },
     )
 
     monkeypatch.setattr(
@@ -426,7 +434,7 @@ async def test_strict_mode_filters_show_mappings_to_top_source(
     fake_client = FakeJellyfinClient(
         sections=sections,
         items=items,
-        show_metadata_fetchers_by_section={"sec-shows": "AniDB"},
+        show_metadata_fetcher_orders_by_section={"sec-shows": ("AniDB",)},
     )
 
     monkeypatch.setattr(
@@ -454,6 +462,58 @@ async def test_strict_mode_filters_show_mappings_to_top_source(
 
     episode_item = season_item.episodes()[0]
     assert episode_item.mapping_descriptors() == (("anidb", "3333", "R"),)
+
+
+@pytest.mark.asyncio
+async def test_non_strict_mode_orders_show_mappings_by_fetcher_priority(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Non-strict mode keeps all descriptors ordered by metadata fetcher priority."""
+    show = FakeItem(
+        id="show-1",
+        name="Show One",
+        type="Series",
+        provider_ids={"AniList": "4444", "Tvdb": "55", "AniDb": "3333"},
+    )
+    sections = [
+        FakeItem(
+            id="sec-shows",
+            name="Shows",
+            type="CollectionFolder",
+            collection_type="tvshows",
+        )
+    ]
+    fake_client = FakeJellyfinClient(
+        sections=sections,
+        items={"sec-shows": [show], "seasons:show-1": [], "episodes:show-1": []},
+        show_metadata_fetcher_orders_by_section={
+            "sec-shows": ("TheTVDB", "AniList", "AniDB")
+        },
+    )
+
+    monkeypatch.setattr(
+        library_module.JellyfinLibraryProvider,
+        "_create_client",
+        lambda self: fake_client,
+    )
+    provider = library_module.JellyfinLibraryProvider(
+        config={
+            "url": "http://jellyfin",
+            "token": "token",
+            "user": "demo",
+            "strict": False,
+        },
+        logger=_test_logger(),
+    )
+    await provider.initialize()
+
+    show_section = (await provider.get_sections())[0]
+    show_item = cast(LibraryShow, (await provider.list_items(show_section))[0])
+    assert show_item.mapping_descriptors() == (
+        ("tvdb_show", "55", None),
+        ("anilist", "4444", None),
+        ("anidb", "3333", None),
+    )
 
 
 @pytest.mark.asyncio

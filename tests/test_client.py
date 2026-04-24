@@ -97,6 +97,7 @@ def test_load_show_metadata_fetchers_uses_ordered_enabled_fetcher() -> None:
     )
     client._library_structure_api = cast(Any, _FakeLibraryStructureApi([folder]))
 
+    assert client._load_show_metadata_fetcher_orders() == {section_id: ("AniList",)}
     assert client._load_show_metadata_fetchers() == {section_id: "AniList"}
 
 
@@ -125,6 +126,9 @@ def test_load_show_metadata_fetchers_uses_enabled_when_order_missing() -> None:
     )
     client._library_structure_api = cast(Any, _FakeLibraryStructureApi([folder]))
 
+    assert client._load_show_metadata_fetcher_orders() == {
+        section_id: ("AniDb", "AniList")
+    }
     assert client._load_show_metadata_fetchers() == {section_id: "AniDb"}
 
 
@@ -825,12 +829,15 @@ async def test_initialize_and_close_manage_client_state(
         lambda: [cast(Any, _FakeItem(id=uuid4(), type=BaseItemKind.COLLECTIONFOLDER))],
     )
     monkeypatch.setattr(
-        client, "_load_show_metadata_fetchers", lambda: {"sec": "AniDb"}
+        client,
+        "_load_show_metadata_fetcher_orders",
+        lambda: {"sec": ("AniDb", "AniList")},
     )
 
     await client.initialize()
     assert client.user_name() == "Demo"
     assert len(client.sections()) == 1
+    assert client.show_metadata_fetchers_for_section("sec") == ("AniDb", "AniList")
     assert client.show_metadata_fetcher_for_section("sec") == "AniDb"
 
     await client.close()
