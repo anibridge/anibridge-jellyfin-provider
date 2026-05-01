@@ -66,6 +66,7 @@ class _FakeItem:
     collection_type: CollectionType | str | None = None
     parent_id: UUID | None = None
     series_id: UUID | None = None
+    season_id: UUID | None = None
     user_data: _FakeUserData | None = None
     date_last_media_added: datetime | None = None
     date_created: datetime | None = None
@@ -137,6 +138,7 @@ def test_is_on_continue_watching_checks_next_up_for_series() -> None:
     user_id = uuid4()
     section_id = uuid4()
     series_id = uuid4()
+    next_episode_id = uuid4()
 
     class _FakeTvShowsApi:
         def get_next_up(self, **kwargs):
@@ -150,7 +152,7 @@ def test_is_on_continue_watching_checks_next_up_for_series() -> None:
                         cast(
                             Any,
                             _FakeItem(
-                                id="ep",
+                                id=next_episode_id,
                                 type=BaseItemKind.EPISODE,
                                 series_id=series_id,
                             ),
@@ -220,6 +222,91 @@ def test_is_on_continue_watching_checks_next_up_for_episode_series() -> None:
         _FakeItem(id=uuid4(), type=BaseItemKind.EPISODE, series_id=series_id),
     )
     assert client.is_on_continue_watching(section, episode) is False
+
+
+def test_is_on_continue_watching_scopes_next_up_to_active_season_and_episode() -> None:
+    """Next Up should only mark the matching season and episode as active."""
+    user_id = uuid4()
+    section_id = uuid4()
+    series_id = uuid4()
+    season_1_id = uuid4()
+    season_2_id = uuid4()
+    current_episode_id = uuid4()
+
+    class _FakeTvShowsApi:
+        def get_next_up(self, **kwargs):
+            assert kwargs["user_id"] == user_id
+            assert kwargs["parent_id"] == section_id
+            return cast(
+                Any,
+                type(
+                    "_Response",
+                    (),
+                    {
+                        "items": [
+                            cast(
+                                Any,
+                                _FakeItem(
+                                    id=current_episode_id,
+                                    type=BaseItemKind.EPISODE,
+                                    series_id=series_id,
+                                    season_id=season_2_id,
+                                ),
+                            )
+                        ]
+                    },
+                )(),
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._tv_shows_api = cast(Any, _FakeTvShowsApi())
+    client._user_id = user_id
+
+    section = cast(
+        Any,
+        _FakeItem(
+            id=section_id,
+            type=BaseItemKind.COLLECTIONFOLDER,
+            collection_type=CollectionType.TVSHOWS,
+        ),
+    )
+
+    series = cast(Any, _FakeItem(id=series_id, type=BaseItemKind.SERIES))
+    season_1 = cast(Any, _FakeItem(id=season_1_id, type=BaseItemKind.SEASON))
+    season_2 = cast(
+        Any,
+        _FakeItem(id=season_2_id, type=BaseItemKind.SEASON, series_id=series_id),
+    )
+    finished_episode = cast(
+        Any,
+        _FakeItem(
+            id=uuid4(),
+            type=BaseItemKind.EPISODE,
+            series_id=series_id,
+            parent_id=season_1_id,
+        ),
+    )
+    current_episode = cast(
+        Any,
+        _FakeItem(
+            id=current_episode_id,
+            type=BaseItemKind.EPISODE,
+            series_id=series_id,
+            season_id=season_2_id,
+            parent_id=season_2_id,
+        ),
+    )
+
+    assert client.is_on_continue_watching(section, series) is True
+    assert client.is_on_continue_watching(section, season_1) is False
+    assert client.is_on_continue_watching(section, season_2) is True
+    assert client.is_on_continue_watching(section, finished_episode) is False
+    assert client.is_on_continue_watching(section, current_episode) is True
 
 
 def test_is_on_continue_watching_reuses_cache_when_item_not_updated() -> None:

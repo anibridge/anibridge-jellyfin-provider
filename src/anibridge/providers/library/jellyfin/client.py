@@ -36,9 +36,9 @@ __all__ = ["JellyfinClient"]
 
 @dataclass(slots=True)
 class _FrozenCacheEntry:
-    """Immutable cache entry for storing Jellyfin series IDs and cache time."""
+    """Immutable cache entry for storing scoped Next Up ids and cache time."""
 
-    keys: frozenset
+    keys: frozenset[UUID]
     cached_at: datetime
 
 
@@ -261,16 +261,20 @@ class JellyfinClient:
 
     def is_on_continue_watching(self, section: BaseItemDto, item: BaseItemDto) -> bool:
         """Determine whether the item appears in Jellyfin's Next Up deck."""
-        if section.id is None or item.type == BaseItemKind.MOVIE:
+        if (
+            section.id is None
+            or item.id is None
+            or item.type
+            not in {
+                BaseItemKind.SERIES,
+                BaseItemKind.SEASON,
+                BaseItemKind.EPISODE,
+            }
+        ):
+            # Next up only supported by shows
             return False
-
         now = datetime.now(tz=UTC)
-        series_id: UUID | None = item.series_id or item.id
-        if series_id is None:
-            return False
-
-        section_id = section.id
-        cache_entry = self._continue_cache.get(section_id)
+        cache_entry = self._continue_cache.get(section.id)
         user_data = item.user_data
         # Refresh when no cache exists, TTL expired, or an item timestamp is newer
         # than the cache. The TTL acts as a safety net because Jellyfin doesn't
@@ -295,36 +299,38 @@ class JellyfinClient:
             if self._tv_shows_api is None or self._user_id is None:
                 raise RuntimeError("Jellyfin client has not been initialized")
 
-            series_ids: set[UUID] = set()
+            keys: set[UUID] = set()
             try:
                 next_up_response = self._tv_shows_api.get_next_up(
                     user_id=self._user_id,
-                    limit=1000,
                     enable_user_data=False,
                     enable_resumable=True,
                     disable_first_episode=True,
-                    parent_id=section_id,
+                    parent_id=section.id,
                 )
                 items = (next_up_response.items or []) if next_up_response else []
 
                 for next_up_item in items:
-                    next_series_id = next_up_item.series_id or next_up_item.id
-                    if next_series_id is not None:
-                        series_ids.add(next_series_id)
+                    keys.update(
+                        k
+                        for k in (
+                            next_up_item.id,
+                            next_up_item.series_id,
+                            next_up_item.season_id,
+                        )
+                        if k is not None
+                    )
             except Exception:
                 self.log.error(
-                    "Failed to load continue watching items for section %s", section_id
+                    "Failed to load continue watching items for section %s", section.id
                 )
                 raise
 
-            cache_entry = _FrozenCacheEntry(
-                keys=frozenset(series_ids),
-                cached_at=now,
-            )
-            self._continue_cache[section_id] = cache_entry
+            cache_entry = _FrozenCacheEntry(keys=frozenset(keys), cached_at=now)
+            self._continue_cache[section.id] = cache_entry
 
         assert cache_entry is not None
-        return series_id in cache_entry.keys
+        return item.id in cache_entry.keys
 
     def is_on_watchlist(self, item: BaseItemDto) -> bool:
         """Determine whether the item is on the user's favorites list."""
