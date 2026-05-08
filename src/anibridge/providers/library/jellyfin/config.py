@@ -1,34 +1,41 @@
 """Jellyfin provider configuration."""
 
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+import msgspec
 
 
-class JellyfinProviderConfig(BaseModel):
+class JellyfinProviderConfig(msgspec.Struct, kw_only=True):
     """Configuration for the Jellyfin provider."""
 
-    url: str = Field(
-        default=...,
-        description="The base URL of the Jellyfin server.",
-    )
-    token: str = Field(
-        default=...,
-        description="The Jellyfin API token.",
-    )
-    user: str = Field(
-        default=...,
-        description="The Jellyfin user to synchronize.",
-    )
-    sections: list[str] = Field(
-        default_factory=list,
-        description=(
-            "A list of Jellyfin library section names to constrain synchronization to."
+    url: Annotated[
+        str,
+        msgspec.Meta(description="The base URL of the Jellyfin server."),
+    ]
+    token: Annotated[
+        str,
+        msgspec.Meta(description="The Jellyfin API token."),
+    ]
+    user: Annotated[
+        str,
+        msgspec.Meta(description="The Jellyfin user to synchronize."),
+    ]
+    sections: Annotated[
+        list[str],
+        msgspec.Meta(
+            description=(
+                "A list of Jellyfin library section names "
+                "to constrain synchronization to."
+            )
         ),
-    )
-    genres: list[str] = Field(
-        default_factory=list,
-        description="A list of genres to constrain synchronization to.",
-    )
-    strict: bool = Field(
-        default=True,
-        description="Whether to enforce strict matching when resolving mappings.",
-    )
+    ] = msgspec.field(default_factory=list)
+    genres: Annotated[
+        list[str],
+        msgspec.Meta(description="A list of genres to constrain synchronization to."),
+    ] = msgspec.field(default_factory=list)
+    strict: Annotated[
+        bool,
+        msgspec.Meta(
+            description="Whether to enforce strict matching when resolving mappings."
+        ),
+    ] = True

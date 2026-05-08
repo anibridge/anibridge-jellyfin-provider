@@ -65,7 +65,7 @@ async def test_webhook_from_form_payload_json_string() -> None:
 
 
 @pytest.mark.asyncio
-async def test_webhook_string_json_payload() -> None:
+async def test_webhook_string_json_body() -> None:
     """String JSON payloads in request.json should be decoded."""
     request = _FakeRequest(
         headers={"content-type": "application/json"},

@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+import msgspec
 from starlette.requests import Request
 
 
@@ -14,24 +14,31 @@ class JellyfinWebhookNotificationType(StrEnum):
     USER_DATA_SAVED = "UserDataSaved"
 
 
-class JellyfinWebhookPayload(BaseModel):
+class JellyfinWebhookPayload(
+    msgspec.Struct,
+    rename={
+        "notification_type": "NotificationType",
+        "user_id": "UserId",
+        "notification_username": "NotificationUsername",
+        "username": "Username",
+        "item_type": "ItemType",
+        "item_id": "ItemId",
+        "series_id": "SeriesId",
+    },
+):
     """Jellyfin webhook payload."""
 
-    model_config = ConfigDict(extra="ignore")
-
-    notification_type: str = Field(..., alias="NotificationType")
-    user_id: str | None = Field(None, alias="UserId")
-    notification_username: str | None = Field(None, alias="NotificationUsername")
-    username: str | None = Field(None, alias="Username")
-    item_type: str | None = Field(None, alias="ItemType")
-    item_id: str | None = Field(None, alias="ItemId")
-    series_id: str | None = Field(None, alias="SeriesId")
+    notification_type: str
+    user_id: str | None = None
+    notification_username: str | None = None
+    username: str | None = None
+    item_type: str | None = None
+    item_id: str | None = None
+    series_id: str | None = None
 
 
-class JellyfinWebhook(BaseModel):
+class JellyfinWebhook(msgspec.Struct):
     """Represents a normalized Jellyfin webhook payload."""
-
-    model_config = ConfigDict(extra="ignore")
 
     payload: JellyfinWebhookPayload
 
@@ -88,14 +95,14 @@ class WebhookParser:
                     payload_raw = payload_raw.decode("utf-8", "replace")
 
                 try:
-                    payload = JellyfinWebhookPayload.model_validate_json(
-                        str(payload_raw)
+                    payload = msgspec.json.decode(
+                        str(payload_raw), type=JellyfinWebhookPayload
                     )
                 except Exception as exc:
                     raise ValueError(f"Invalid payload JSON: {exc}") from exc
             else:
                 try:
-                    payload = JellyfinWebhookPayload.model_validate(dict(form))
+                    payload = msgspec.convert(dict(form), type=JellyfinWebhookPayload)
                 except Exception as exc:
                     raise ValueError(
                         f"Invalid Jellyfin webhook payload: {exc}"
@@ -111,7 +118,7 @@ class WebhookParser:
 
             if isinstance(data, str):
                 try:
-                    payload = JellyfinWebhookPayload.model_validate_json(data)
+                    payload = msgspec.json.decode(data, type=JellyfinWebhookPayload)
                 except Exception as exc:
                     raise ValueError(
                         f"Invalid Jellyfin webhook payload: {exc}"
@@ -122,7 +129,7 @@ class WebhookParser:
                 raise ValueError("Invalid payload structure: expected JSON object")
 
             try:
-                payload = JellyfinWebhookPayload.model_validate(data)
+                payload = msgspec.convert(data, type=JellyfinWebhookPayload)
             except Exception as exc:
                 raise ValueError(f"Invalid Jellyfin webhook payload: {exc}") from exc
 
