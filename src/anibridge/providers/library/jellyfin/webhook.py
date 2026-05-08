@@ -69,7 +69,7 @@ class JellyfinWebhook(msgspec.Struct):
         return self.payload.item_id or self.payload.series_id
 
     @classmethod
-    async def from_request(cls, request: "Request") -> JellyfinWebhook:
+    async def from_request(cls, request: Request) -> JellyfinWebhook:
         """Create a Jellyfin webhook instance from an incoming HTTP request."""
         return await WebhookParser.from_request(request)
 
@@ -85,7 +85,7 @@ class WebhookParser:
         return content_type.split(";", 1)[0].strip().lower()
 
     @classmethod
-    async def from_request(cls, request: "Request") -> JellyfinWebhook:
+    async def from_request(cls, request: Request) -> JellyfinWebhook:
         """Create a Jellyfin webhook instance from an incoming HTTP request."""
         content_type = cls.media_type(request.headers.get("content-type"))
 

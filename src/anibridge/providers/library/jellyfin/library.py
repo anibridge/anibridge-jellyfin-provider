@@ -516,7 +516,7 @@ class JellyfinLibraryProvider(LibraryProvider):
         )
         return tuple(self._wrap_entry(section, item) for item in raw_items)
 
-    async def parse_webhook(self, request: "Request") -> tuple[bool, Sequence[str]]:
+    async def parse_webhook(self, request: Request) -> tuple[bool, Sequence[str]]:
         """Parse a Jellyfin webhook request and determine affected media items."""
         payload = await JellyfinWebhook.from_request(request)
 
