@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import msgspec
 from anibridge.library import (
@@ -22,7 +22,6 @@ from anibridge.library.base import MappingDescriptor
 from anibridge.utils.cache import cache, ttl_cache
 from anibridge.utils.image import fetch_image_as_data_url
 from anibridge.utils.types import ProviderLogger
-from starlette.requests import Request
 
 from anibridge.providers.library.jellyfin.client import JellyfinClient
 from anibridge.providers.library.jellyfin.config import JellyfinProviderConfig
@@ -31,6 +30,9 @@ from anibridge.providers.library.jellyfin.webhook import (
     JellyfinWebhookNotificationType,
 )
 from jellyfin.generated.api_10_11.models import BaseItemDto, BaseItemKind
+
+if TYPE_CHECKING:
+    from litestar.connection.request import Request
 
 # Maps a Jellyfin provider external ID key to an AniBridge provider key
 _PROVIDER_ID_MAP: dict[Literal["movie", "show"], dict[str, str]] = {
@@ -514,7 +516,7 @@ class JellyfinLibraryProvider(LibraryProvider):
         )
         return tuple(self._wrap_entry(section, item) for item in raw_items)
 
-    async def parse_webhook(self, request: Request) -> tuple[bool, Sequence[str]]:
+    async def parse_webhook(self, request: "Request") -> tuple[bool, Sequence[str]]:
         """Parse a Jellyfin webhook request and determine affected media items."""
         payload = await JellyfinWebhook.from_request(request)
 

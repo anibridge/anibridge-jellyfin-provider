@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "anibridge-library-base>=0.2.0",
+    "anibridge-library-base>=0.2.1",
     "anibridge-utils>=0.2.0",
     "jellyfin-sdk>=0.3.0",
     "msgspec>=0.21.1",

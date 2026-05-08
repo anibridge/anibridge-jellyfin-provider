@@ -3,7 +3,7 @@
 from typing import cast
 
 import pytest
-from starlette.requests import Request
+from litestar.connection.request import Request
 
 from anibridge.providers.library.jellyfin.webhook import JellyfinWebhook
 
