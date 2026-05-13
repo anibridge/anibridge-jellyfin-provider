@@ -67,6 +67,7 @@ _SHOW_FETCHER_TO_PROVIDER: dict[str, str] = {
     "TheMovieDb": "tmdb_show",
     "IMDb": "imdb_show",
     "Shoko": "anidb",
+    "AnimeMultiSource": "anidb",
 }
 
 
