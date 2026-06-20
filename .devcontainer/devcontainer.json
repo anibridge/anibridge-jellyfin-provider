@@ -1,18 +1,18 @@
 {
     "name": "anibridge-jellyfin-provider",
-    "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+    "image": "mcr.microsoft.com/devcontainers/base:resolute",
     "features": {
         "ghcr.io/devcontainers/features/github-cli:1": {},
-        "ghcr.io/devcontainers-extra/features/uv": {}
+        "ghcr.io/devcontainers-extra/features/uv:1": {}
     },
     "customizations": {
         "vscode": {
             "extensions": [
                 "astral-sh.ty",
                 "charliermarsh.ruff",
-                "eamodio.gitlens",
                 "esbenp.prettier-vscode",
                 "ms-python.python",
+                "SmallMain.vscode-unify-chat-provider",
                 "tamasfe.even-better-toml",
                 "yzhang.markdown-all-in-one"
             ],
@@ -24,5 +24,6 @@
     "postCreateCommand": "uv sync --all-extras --all-groups --all-packages",
     "containerEnv": {
         "UV_LINK_MODE": "copy"
-    }
+    },
+    "mounts": ["source=gh-auth,target=/home/vscode/.config/gh,type=volume"]
 }
