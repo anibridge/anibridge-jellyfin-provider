@@ -588,6 +588,141 @@ async def test_list_section_items_require_watched_includes_series_with_activity(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("item_count", [50, 51, 305])
+@pytest.mark.parametrize("require_watched", [False, True])
+@pytest.mark.parametrize(
+    "collection_type", [CollectionType.MOVIES, CollectionType.TVSHOWS]
+)
+async def test_list_section_items_batches_keyed_requests(
+    item_count: int, require_watched: bool, collection_type: CollectionType
+) -> None:
+    item_ids = [uuid4() for _ in range(item_count)]
+    item_type = (
+        BaseItemKind.MOVIE
+        if collection_type == CollectionType.MOVIES
+        else BaseItemKind.SERIES
+    )
+    section = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.COLLECTIONFOLDER,
+        collection_type=collection_type,
+    )
+    captured_calls: list[dict[str, Any]] = []
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            if kwargs["include_item_types"] == [BaseItemKind.EPISODE]:
+                episode = _FakeItem(
+                    id=uuid4(),
+                    type=BaseItemKind.EPISODE,
+                    series_id=kwargs["parent_id"],
+                )
+                return SimpleNamespace(items=[episode])
+            captured_calls.append(kwargs)
+            return SimpleNamespace(
+                items=[
+                    _FakeItem(id=item_id, type=item_type) for item_id in kwargs["ids"]
+                ]
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+        genre_filter=["Action"],
+    )
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_id = uuid4()
+
+    items = await client.list_section_items(
+        cast(Any, section),
+        require_watched=require_watched,
+        keys=[str(item_id) for item_id in item_ids],
+    )
+
+    assert [item.id for item in items] == item_ids
+    assert [call["ids"] for call in captured_calls] == [
+        item_ids[offset : offset + 50] for offset in range(0, item_count, 50)
+    ]
+    for call in captured_calls:
+        assert call["user_id"] == client._user_id
+        assert call["include_item_types"] == [item_type]
+        assert call["genres"] == ["action"]
+        assert call["fields"] == list(client.ITEM_FIELDS)
+        assert call["enable_user_data"] is True
+        assert call["enable_images"] is True
+        assert call["recursive"] is True
+        if collection_type == CollectionType.MOVIES or not require_watched:
+            assert call["parent_id"] == section.id
+        if collection_type == CollectionType.MOVIES and require_watched:
+            assert call["is_played"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolve_seasons", [False, True])
+async def test_list_section_items_batches_watched_series_requests(
+    resolve_seasons: bool,
+) -> None:
+    series_ids = [uuid4() for _ in range(305)]
+    season_ids = [uuid4() for _ in series_ids]
+    shows = [
+        _FakeItem(id=series_id, type=BaseItemKind.SERIES) for series_id in series_ids
+    ]
+    seasons = [
+        _FakeItem(id=season_id, type=BaseItemKind.SEASON, parent_id=series_id)
+        for season_id, series_id in zip(season_ids, series_ids, strict=True)
+    ]
+    episodes = [
+        _FakeItem(
+            id=uuid4(),
+            type=BaseItemKind.EPISODE,
+            series_id=None if resolve_seasons else series_id,
+            parent_id=season_id,
+        )
+        for season_id, series_id in zip(season_ids, series_ids, strict=True)
+    ]
+    section = _FakeItem(
+        id=uuid4(),
+        type=BaseItemKind.COLLECTIONFOLDER,
+        collection_type=CollectionType.TVSHOWS,
+    )
+    captured_calls: list[dict[str, Any]] = []
+
+    class _FakeItemsApi:
+        def get_items(self, **kwargs):
+            captured_calls.append(kwargs)
+            if kwargs["include_item_types"] == [BaseItemKind.EPISODE]:
+                return SimpleNamespace(items=episodes)
+            candidates = (
+                seasons
+                if kwargs["include_item_types"] == [BaseItemKind.SEASON]
+                else shows
+            )
+            return SimpleNamespace(
+                items=[item for item in candidates if item.id in kwargs["ids"]]
+            )
+
+    client = JellyfinClient(
+        logger=cast(Any, _test_logger()),
+        url="http://jellyfin",
+        token="token",
+        user="demo",
+    )
+    client._items_api = cast(Any, _FakeItemsApi())
+    client._user_id = uuid4()
+
+    items = await client.list_section_items(cast(Any, section), require_watched=True)
+
+    assert len(items) == len(series_ids)
+    assert {item.id for item in items} == set(series_ids)
+    assert captured_calls[0]["ids"] is None
+    id_calls = captured_calls[1:]
+    assert len(id_calls) == (21 if resolve_seasons else 7)
+    assert all(0 < len(call["ids"]) <= 50 for call in id_calls)
+
+
+@pytest.mark.asyncio
 async def test_list_section_items_require_watched_uses_episode_activity_for_cutoff():
     """TV watched cutoff should be applied to watched episodes, not series metadata."""
     now = datetime.now(UTC)

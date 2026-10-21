@@ -5,6 +5,7 @@ import importlib.metadata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from itertools import batched
 from typing import ClassVar
 from urllib.parse import urlencode
 from uuid import UUID
@@ -55,6 +56,7 @@ class JellyfinClient:
     )
     PARENT_ID_FIELD: ClassVar[list[ItemFields]] = [ItemFields.PARENTID]
 
+    _ITEM_ID_BATCH_SIZE: ClassVar[int] = 50
     _CONTINUE_CACHE_TTL: ClassVar[timedelta] = timedelta(seconds=55)
 
     def __init__(
@@ -451,19 +453,28 @@ class JellyfinClient:
             enable_user_data: bool = False,
             enable_images: bool = False,
         ) -> list[BaseItemDto]:
-            response = items_api.get_items(
-                user_id=user_id,
-                parent_id=parent_id,
-                include_item_types=include_item_types,
-                recursive=True,
-                fields=fields,
-                enable_user_data=enable_user_data,
-                enable_images=enable_images,
-                is_played=is_played,
-                genres=genres,
-                ids=ids,
+            id_batches = (
+                batched(ids, self._ITEM_ID_BATCH_SIZE, strict=False)
+                if ids is not None
+                else (None,)
             )
-            return list(response.items or []) if response else []
+            items: list[BaseItemDto] = []
+            for id_batch in id_batches:
+                response = items_api.get_items(
+                    user_id=user_id,
+                    parent_id=parent_id,
+                    include_item_types=include_item_types,
+                    recursive=True,
+                    fields=fields,
+                    enable_user_data=enable_user_data,
+                    enable_images=enable_images,
+                    is_played=is_played,
+                    genres=genres,
+                    ids=list(id_batch) if id_batch is not None else None,
+                )
+                if response:
+                    items.extend(response.items or [])
+            return items
 
         if not require_watched:
             items = _get_items(
